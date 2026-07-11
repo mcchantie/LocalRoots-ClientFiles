@@ -55,21 +55,21 @@ Development is intentionally destructive and may contain incomplete or invalid t
 
 ### Consequences
 
-- Recovery will use RDS backups, point-in-time recovery, S3 versioning, soft deletion, and controlled restore procedures.
+- Recovery will use database backups, point-in-time recovery, S3 versioning, soft deletion, and controlled restore procedures.
 - Production data may be copied downward into development only through a controlled and preferably sanitized process.
 - Development should also maintain reusable fake seed data.
 
 ---
 
-## ADR-004: S3 Stores Files; RDS Stores Metadata
+## ADR-004: S3 Stores Files; PostgreSQL Stores Metadata
 
 **Status:** Accepted
 
-Amazon S3 will store file objects. The Local Roots relational database will store metadata, search fields, processing state, ownership, tenant relationships, and business relationships.
+Amazon S3 will store file objects. The Local Roots PostgreSQL database will store metadata, search fields, processing state, ownership, tenant relationships, and business relationships.
 
 ### Rationale
 
-S3 is better suited for binary objects, large files, durability, and direct browser uploads. RDS is better suited for relationships, filtering, auditing, and analytics.
+S3 is better suited for binary objects, large files, durability, and direct browser uploads. PostgreSQL is better suited for relationships, filtering, auditing, and analytics. The database provider may change without changing this storage boundary.
 
 ### Consequences
 
@@ -93,7 +93,7 @@ The database should store fields such as:
 - Soft-deletion state
 - Flexible metadata JSON
 
-File bytes will not be stored in RDS.
+File bytes will not be stored in PostgreSQL.
 
 ---
 
@@ -233,7 +233,7 @@ Processing may run in the Spring Boot application using a task executor.
 
 Estimater will store:
 
-- Structured estimate records in RDS
+- Structured estimate records in PostgreSQL
 - Structured line items
 - Calculator input and output snapshots
 - Pricing-rule version
@@ -296,7 +296,7 @@ Every attachment-related record and action must enforce tenant isolation.
 
 **Status:** Accepted
 
-Attachments will use soft deletion in the application. S3 versioning and RDS backups will protect against accidental loss.
+Attachments will use soft deletion in the application. S3 versioning and PostgreSQL backups will protect against accidental loss.
 
 ### Rationale
 
@@ -320,3 +320,118 @@ The project will maintain:
 - Architecture decisions records durable choices.
 - Current development status provides a concise handoff for the next session.
 - At the beginning of a later session, these files can be uploaded or pasted to restore context.
+
+---
+
+## ADR-017: S3 Region and Bucket Security Baseline
+
+**Status:** Accepted
+
+Client Files S3 resources will initially be created in **`us-east-2`** with separate buckets for development and production.
+
+Bucket names will identify the application and environment and include enough account, region, or unique-suffix information to remain globally unique.
+
+### Required Bucket Settings
+
+- Block Public Access enabled
+- Object Ownership set to bucket-owner-enforced
+- ACLs disabled
+- S3 versioning enabled
+- Objects private by default
+
+### Rationale
+
+Separate, private, versioned buckets reduce the risk of development activity affecting operational client files and provide recovery options for accidental overwrites or deletions.
+
+---
+
+## ADR-018: Separate Human and Application IAM Access
+
+**Status:** Accepted
+
+Human AWS access and application AWS access will use different IAM identities and policies.
+
+### Application Access
+
+- Use a dedicated application IAM user for each environment while the backend runs locally or on Railway.
+- Development and production credentials must remain separate.
+- Application policies should be restricted to the matching Client Files bucket and required S3 actions.
+- The planned service-user names are:
+  - `localroots-client-files-dev-app`
+  - `localroots-client-files-prod-app`
+- The planned bucket-scoped policy names are:
+  - `LocalRootsClientFilesDevS3Policy`
+  - `LocalRootsClientFilesProdS3Policy`
+
+### Human Access
+
+The `Developers` IAM group may use `AmazonS3FullAccess` for development-console work. This broad human policy must not be reused as the production application's runtime policy.
+
+### Future Direction
+
+If the backend later runs on AWS infrastructure that supports IAM roles, replace long-lived application access keys with role-based credentials.
+
+---
+
+## ADR-019: AWS Credentials Are Supplied Through the Default Credential Chain
+
+**Status:** Accepted
+
+The Spring Boot application will use the AWS SDK default credential provider chain rather than reading secret keys from custom application properties.
+
+### Local and Railway Configuration
+
+Use environment variables such as:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION`
+- `CLIENT_FILES_S3_BUCKET`
+
+Bucket and region configuration may be referenced by Spring configuration, but access keys must not be committed to `application.yml`, source control, or the database.
+
+### Verification
+
+Before application testing, verify the active identity and development-bucket access with the AWS CLI, including `aws sts get-caller-identity` and a controlled S3 upload/delete test.
+
+---
+
+## ADR-020: Initial Railway Hosting and Deferred PostgreSQL Migration
+
+**Status:** Accepted; migration deferred
+
+The Local Roots backend will initially continue running on Railway because Texas Top Dressing is currently the only operational tenant.
+
+Amazon S3 can be accessed from the current Railway plan through normal outbound HTTPS using IAM credentials; a static outbound IP is not required for S3 access.
+
+The existing PostgreSQL database is currently hosted in AWS RDS. A migration from AWS RDS to Railway PostgreSQL is planned because connecting a Railway deployment to a tightly restricted external RDS instance is inconvenient without a stable outbound IP.
+
+### Migration Safety Requirements
+
+- Do not delete the AWS RDS database before migration and validation are complete.
+- Take a backup before migration.
+- Copy data to Railway PostgreSQL.
+- Validate schema, row counts, application reads, and writes.
+- Keep a rollback path until the Railway database is confirmed stable.
+
+### Deferred Work
+
+The migration is documented but will not be performed during the current S3 upload implementation phase.
+
+---
+
+## ADR-021: Shared AWS SDK v2 Client Configuration
+
+**Status:** Accepted
+
+The backend will use AWS SDK for Java v2. Adding the required Maven or Gradle dependency is the installation step; no separate system-wide SDK installation is required.
+
+`S3Client` and `S3Presigner` will be configured once as Spring beans in:
+
+- File: `src/main/java/com/localroots/crm/config/S3Config.java`
+- Package: `com.localroots.crm.config`
+
+### Rationale
+
+Central bean configuration keeps region and credential behavior consistent and allows upload, verification, download, and presigning services to reuse the same clients.
+

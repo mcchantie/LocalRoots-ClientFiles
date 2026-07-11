@@ -147,3 +147,97 @@ Define the purpose, architecture, storage model, environment strategy, estimate 
 16. Connect Estimater saving to structured estimate records and generated S3 documents.
 17. Add soft deletion, restore behavior, error logging, and failed-upload visibility.
 18. Add UAT later when release testing requires a stable environment between development and production.
+
+---
+
+## Session: July 10, 2026
+
+### Session Goal
+
+Create the AWS storage foundation for Client Files, establish safe IAM and credential handling, decide how Railway will connect to AWS resources, and prepare the Spring Boot backend for local S3 upload testing.
+
+### Questions Discussed
+
+- Which AWS region and naming pattern should be used for the development and production S3 buckets?
+- Which S3 security settings should be enabled when creating the buckets?
+- Should development and production use separate IAM users and policies?
+- What permissions should the developer group have for normal S3 console work?
+- Why was **Edit tags** disabled even though the developer group had `AmazonS3FullAccess`?
+- What is the difference between bucket tags and object tags in the S3 console?
+- Can the Railway-hosted application access S3 on the current Railway plan, or is an upgrade required?
+- Should the existing PostgreSQL database in AWS RDS be deleted or moved to Railway?
+- How should the planned AWS RDS-to-Railway PostgreSQL migration be handled and documented?
+- How should local AWS access keys be stored and verified?
+- Can AWS secrets be supplied as environment variables and referenced by the application configuration?
+- Does the AWS SDK need to be installed separately?
+- Where should the Spring beans for `S3Client` and `S3Presigner` be created?
+
+### Design Decisions
+
+- Use **`us-east-2`** for the initial Client Files S3 resources.
+- Use separate development and production buckets with environment-specific, globally unique names.
+- Keep Block Public Access enabled, ACLs disabled through bucket-owner-enforced object ownership, and versioning enabled.
+- Use separate application IAM users and bucket-scoped policies for development and production.
+- The planned service users are:
+  - `localroots-client-files-dev-app`
+  - `localroots-client-files-prod-app`
+- The planned customer-managed policies are:
+  - `LocalRootsClientFilesDevS3Policy`
+  - `LocalRootsClientFilesProdS3Policy`
+- The human `Developers` group may retain `AmazonS3FullAccess` for development-console work, but the application should use the more restricted environment-specific policy.
+- No extra policy is required merely to edit S3 tags when `AmazonS3FullAccess` is already attached.
+- Bucket tags are edited from the bucket **Properties** page. Object tags require an uploaded object to be selected; **Edit tags** was disabled because the bucket contained zero objects.
+- Railway can access S3 on the current plan through outbound HTTPS and IAM credentials; a Railway upgrade or static outbound IP is not required for S3.
+- Keep the backend on Railway initially.
+- Plan to migrate the PostgreSQL database from AWS RDS to Railway PostgreSQL, but defer that work while implementing S3 uploads.
+- Do not delete the AWS RDS database until the migration has been backed up, copied, validated, and given a rollback window.
+- Store AWS credentials outside the repository using `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `CLIENT_FILES_S3_BUCKET`.
+- Use the AWS SDK default credential provider chain rather than custom secret-key properties in `application.yml`.
+- Verify local credentials with the AWS CLI before testing the Spring Boot integration.
+- Use AWS SDK for Java v2. Adding its project dependency is sufficient; no separate machine-wide SDK installation is required.
+- Create `S3Client` and `S3Presigner` beans in `com.localroots.crm.config.S3Config`.
+
+### Work Completed
+
+- Created separate Client Files development and production S3 buckets.
+- Selected `us-east-2` as the initial AWS region.
+- Established the private-bucket baseline of Block Public Access, bucket-owner-enforced object ownership, disabled ACLs, and versioning.
+- Created the environment-specific IAM policies and application users for S3 access.
+- Confirmed that the `Developers` group has `AmazonS3FullAccess` for development work.
+- Resolved the apparent S3 tagging-permission issue: the disabled action was an object-selection issue, not missing IAM permission.
+- Confirmed that the current Railway plan can connect to S3 without an upgrade.
+- Documented the deferred AWS RDS-to-Railway PostgreSQL migration and the requirement not to delete RDS prematurely.
+- Defined the environment-variable names that will provide AWS credentials and bucket configuration locally and on Railway.
+- Defined the AWS CLI identity and S3 access checks to perform before application testing.
+- Chosen the package and class location for reusable `S3Client` and `S3Presigner` beans.
+
+### Unresolved Questions
+
+- Have the development access keys been created, securely stored, and successfully verified with `aws sts get-caller-identity`?
+- Has a controlled upload and delete test against the development bucket been completed?
+- Which exact AWS SDK v2 dependency versions or BOM version should be used by the existing backend build?
+- Does the backend already contain a general AWS or storage configuration pattern that `S3Config` should follow?
+- What exact S3 actions are required by the first application policy once the upload flow is implemented?
+- Should the application policy include delete permissions immediately, or should deletion remain application-level soft deletion only at first?
+- How will production AWS secrets be stored in Railway and rotated?
+- When should the RDS-to-Railway PostgreSQL migration be scheduled?
+- What migration and rollback commands will be used for the PostgreSQL move?
+- What columns and constraints already exist in `contact_attachments` and related tenant/contact tables?
+- What initial file types and size limits should be enforced?
+- What lifecycle rules should be added for abandoned uploads and older object versions?
+
+### Next Steps
+
+1. Add the AWS SDK for Java v2 S3 dependency to the Spring Boot backend.
+2. Create `src/main/java/com/localroots/crm/config/S3Config.java` with `S3Client` and `S3Presigner` beans.
+3. Add non-secret bucket and region properties to the Spring configuration.
+4. Set the development AWS credentials and bucket name as local environment variables; do not use production credentials locally.
+5. Verify the active IAM identity with `aws sts get-caller-identity`.
+6. Run a controlled development-bucket upload, read, and delete test.
+7. Add a small backend S3 smoke test or service to confirm the application can use the configured beans.
+8. Inspect the current attachment, tenant, contact, user, and address database schema.
+9. Implement the upload-initialization endpoint and presigned upload flow.
+10. Implement upload-completion verification and attachment status transitions.
+11. Add the development secrets to Railway only after local testing succeeds.
+12. Plan and document the AWS RDS-to-Railway PostgreSQL migration separately; keep the existing RDS database until cutover is validated.
+
