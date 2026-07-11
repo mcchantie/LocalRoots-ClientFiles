@@ -1,0 +1,10 @@
+#Add to Railway
+#AWS_ACCESS_KEY_ID=<development access key ID>
+#AWS_SECRET_ACCESS_KEY=<development secret access key>
+#AWS_REGION=us-east-2
+#CLIENT_FILES_S3_BUCKET=<exact development bucket name>
+
+storage:
+  s3:
+    bucket: ${CLIENT_FILES_S3_BUCKET_DEV}
+    region: us-east-2
