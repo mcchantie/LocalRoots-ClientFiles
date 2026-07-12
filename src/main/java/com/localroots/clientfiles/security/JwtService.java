@@ -1,10 +1,10 @@
 package com.localroots.clientfiles.security;
 
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -21,11 +21,7 @@ public class JwtService {
     private final AuthenticationProperties properties;
     private final Clock clock;
 
-    public JwtService(JwtEncoder jwtEncoder, AuthenticationProperties properties) {
-        this(jwtEncoder, properties, Clock.systemUTC());
-    }
-
-    JwtService(JwtEncoder jwtEncoder, AuthenticationProperties properties, Clock clock) {
+    public JwtService(JwtEncoder jwtEncoder, AuthenticationProperties properties, Clock clock) {
         this.jwtEncoder = jwtEncoder;
         this.properties = properties;
         this.clock = clock;
