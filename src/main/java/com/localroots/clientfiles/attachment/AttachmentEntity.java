@@ -190,6 +190,10 @@ public class AttachmentEntity {
         deletedAt = null;
     }
 
+    public void assignContact(UUID contactId) {
+        this.contactId = contactId;
+    }
+
     public UUID getId() { return id; }
     public UUID getTenantId() { return tenantId; }
     public UUID getContactId() { return contactId; }

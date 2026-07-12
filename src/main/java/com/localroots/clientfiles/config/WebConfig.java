@@ -1,30 +1,35 @@
 package com.localroots.clientfiles.config;
 
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 @Configuration
-public class WebConfig implements WebMvcConfigurer {
+public class WebConfig {
 
-    private final CorsProperties corsProperties;
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource(CorsProperties properties) {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(properties.getAllowedOrigins());
+        configuration.setAllowedOriginPatterns(properties.getAllowedOriginPatterns());
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of(
+                "Authorization",
+                "Content-Type",
+                "Accept",
+                "X-Correlation-Id",
+                "X-Tenant-Id"
+        ));
+        configuration.setExposedHeaders(List.of("Location", "X-Correlation-Id"));
+        configuration.setAllowCredentials(false);
+        configuration.setMaxAge(3600L);
 
-    public WebConfig(CorsProperties corsProperties) {
-        this.corsProperties = corsProperties;
-    }
-
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
-        if (corsProperties.getAllowedOrigins().isEmpty()) {
-            return;
-        }
-
-        registry.addMapping("/api/**")
-                .allowedOrigins(corsProperties.getAllowedOrigins().toArray(String[]::new))
-                .allowedMethods("GET", "POST", "DELETE", "OPTIONS")
-                .allowedHeaders("Content-Type", "X-Tenant-Id", "X-Correlation-Id")
-                .exposedHeaders("Location", "X-Correlation-Id")
-                .allowCredentials(true)
-                .maxAge(3600);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", configuration);
+        return source;
     }
 }

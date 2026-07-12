@@ -8,6 +8,8 @@ spring:
     username: ${LOCALROOTS_DEV_DB_USER}
     password: ${LOCALROOTS_DEV_DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: false
   jpa:
     open-in-view: false
     generate-ddl: false
@@ -17,6 +19,7 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+
 server:
   shutdown: graceful
   error:
@@ -32,12 +35,21 @@ storage:
     allowed-content-types: image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,video/mp4,video/quicktime
 
 client-files:
+  auth:
+    admin-username: test-admin
+    admin-password: test-password-only
+    tenant-id: 11111111-1111-1111-1111-111111111111
+    jwt-secret-base64: bG9jYWwtZGV2ZWxvcG1lbnQtand0LXNlY3JldC1vbmx5LTMyaA==
+    jwt-issuer: client-files-api-test
+    access-token-ttl: 1h
   cors:
-    allowed-origins: ${CLIENT_FILES_ALLOWED_ORIGINS:}
+    allowed-origins:
+      - http://localhost:5173
+    allowed-origin-patterns: []
   security:
-    allow-tenant-header: ${CLIENT_FILES_ALLOW_TENANT_HEADER:false}
-    allow-unverified-contact-ids: ${CLIENT_FILES_ALLOW_UNVERIFIED_CONTACT_IDS:false}
-    allow-unverified-estimate-ids: ${CLIENT_FILES_ALLOW_UNVERIFIED_ESTIMATE_IDS:false}
+    allow-tenant-header: false
+    allow-unverified-contact-ids: false
+    allow-unverified-estimate-ids: false
 
 management:
   endpoints:

@@ -3,6 +3,9 @@ package com.localroots.clientfiles.security;
 import com.localroots.clientfiles.common.ApiException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -19,14 +22,39 @@ public class RequestTenantResolver {
     }
 
     public UUID requireTenantId(HttpServletRequest request) {
-        if (!properties.isAllowTenantHeader()) {
-            throw new ApiException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "Tenant authentication is not configured",
-                    "Configure authenticated tenant resolution before enabling Client Files outside development."
-            );
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getPrincipal() instanceof Jwt jwt) {
+            String claim = jwt.getClaimAsString(JwtService.TENANT_ID_CLAIM);
+            if (claim == null || claim.isBlank()) {
+                throw new ApiException(
+                        HttpStatus.UNAUTHORIZED,
+                        "Tenant claim is missing",
+                        "The access token does not contain a tenant identifier."
+                );
+            }
+            try {
+                return UUID.fromString(claim);
+            } catch (IllegalArgumentException exception) {
+                throw new ApiException(
+                        HttpStatus.UNAUTHORIZED,
+                        "Tenant claim is invalid",
+                        "The access token contains an invalid tenant identifier."
+                );
+            }
         }
 
+        if (properties.isAllowTenantHeader()) {
+            return parseDevelopmentTenantHeader(request);
+        }
+
+        throw new ApiException(
+                HttpStatus.UNAUTHORIZED,
+                "Authentication required",
+                "Send a valid Bearer token."
+        );
+    }
+
+    private UUID parseDevelopmentTenantHeader(HttpServletRequest request) {
         String value = request.getHeader(TENANT_HEADER);
         if (value == null || value.isBlank()) {
             throw new ApiException(

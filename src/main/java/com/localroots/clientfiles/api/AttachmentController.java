@@ -67,6 +67,7 @@ public class AttachmentController {
             @RequestParam(required = false) UUID contactId,
             @RequestParam(required = false) AttachmentCategory category,
             @RequestParam(required = false) AttachmentStatus status,
+            @RequestParam(defaultValue = "false") boolean unassigned,
             @RequestParam(defaultValue = "false") boolean includeDeleted,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size
@@ -76,6 +77,7 @@ public class AttachmentController {
                 contactId,
                 category,
                 status,
+                unassigned,
                 includeDeleted,
                 page,
                 size
@@ -105,5 +107,18 @@ public class AttachmentController {
             @PathVariable UUID attachmentId
     ) {
         return attachmentService.restore(tenantResolver.requireTenantId(request), attachmentId);
+    }
+
+    @PostMapping("/{attachmentId}/assign")
+    public AttachmentResponse assignAttachment(
+            HttpServletRequest request,
+            @PathVariable UUID attachmentId,
+            @RequestBody AssignAttachmentRequest body
+    ) {
+        return attachmentService.assignToContact(
+                tenantResolver.requireTenantId(request),
+                attachmentId,
+                body.contactId()
+        );
     }
 }

@@ -1,0 +1,286 @@
+# Base44 Integration Contract
+
+## API base URL
+
+Use the Railway HTTPS domain, without a trailing slash:
+
+```text
+https://your-client-files-api.up.railway.app
+```
+
+All JSON requests use:
+
+```http
+Content-Type: application/json
+```
+
+Protected requests use:
+
+```http
+Authorization: Bearer <accessToken>
+```
+
+Do not send `X-Tenant-Id` in production. The API derives the tenant from the signed token.
+
+## Authentication
+
+### Login
+
+```http
+POST /api/v1/auth/login
+```
+
+Request:
+
+```json
+{
+  "username": "crystal",
+  "password": "the Railway-configured password"
+}
+```
+
+Response:
+
+```json
+{
+  "tokenType": "Bearer",
+  "accessToken": "eyJ...",
+  "expiresAt": "2026-07-12T23:00:00Z",
+  "username": "crystal",
+  "tenantId": "11111111-1111-1111-1111-111111111111"
+}
+```
+
+Store the token for the current browser session. When any protected request returns `401`, clear the token and return to the login screen.
+
+### Current user
+
+```http
+GET /api/v1/auth/me
+```
+
+## Contacts
+
+A contact name is optional. At least one usable phone number or email address is required.
+
+### Create
+
+```http
+POST /api/v1/contacts
+```
+
+```json
+{
+  "firstName": null,
+  "lastName": null,
+  "displayName": null,
+  "phone": "832-555-0100",
+  "email": null,
+  "notes": "Lead sent a lawn photo but did not provide a name."
+}
+```
+
+### List and search
+
+```http
+GET /api/v1/contacts?search=&page=0&size=50
+```
+
+### Read
+
+```http
+GET /api/v1/contacts/{contactId}
+```
+
+### Update
+
+```http
+PUT /api/v1/contacts/{contactId}
+```
+
+## Attachments
+
+Categories:
+
+```text
+ESTIMATES
+LANDGLIDE
+PROPERTY_PHOTOS
+VIDEOS
+DOCUMENTS
+OTHER
+```
+
+Statuses:
+
+```text
+PENDING_UPLOAD
+UPLOADED
+PROCESSING
+READY
+FAILED
+```
+
+### List
+
+```http
+GET /api/v1/attachments?page=0&size=25
+GET /api/v1/attachments?contactId={uuid}
+GET /api/v1/attachments?unassigned=true
+GET /api/v1/attachments?category=PROPERTY_PHOTOS
+GET /api/v1/attachments?status=READY
+GET /api/v1/attachments?includeDeleted=true
+```
+
+Filters may be combined. When `contactId` is present it takes precedence over `unassigned=true`.
+
+### Initialize an upload
+
+```http
+POST /api/v1/attachments/uploads
+```
+
+```json
+{
+  "contactId": "optional-contact-uuid",
+  "estimateId": null,
+  "parentAttachmentId": null,
+  "category": "PROPERTY_PHOTOS",
+  "originalFileName": "back-yard.jpg",
+  "displayName": "Back yard before grading",
+  "contentType": "image/jpeg",
+  "sizeBytes": 2458134,
+  "checksumSha256Base64": null,
+  "sourceSystem": "base44",
+  "description": null,
+  "metadata": {
+    "capturedFrom": "dashboard"
+  }
+}
+```
+
+The response contains:
+
+- `attachmentId`
+- `method`, currently `PUT`
+- `uploadUrl`
+- `expiresAt`
+- `requiredHeaders`
+
+### Upload directly to S3
+
+Use the exact HTTP method, presigned URL, and every returned required header. The request body is the raw browser `File` object. Do not send the Railway bearer token to S3.
+
+```javascript
+await fetch(upload.uploadUrl, {
+  method: upload.method,
+  headers: upload.requiredHeaders,
+  body: file
+});
+```
+
+### Complete the upload
+
+After S3 returns a 2xx response:
+
+```http
+POST /api/v1/attachments/{attachmentId}/complete
+Authorization: Bearer <accessToken>
+```
+
+Only show the file as successfully stored after this endpoint returns `READY`.
+
+### Open or download
+
+```http
+POST /api/v1/attachments/{attachmentId}/download-url?download=false
+POST /api/v1/attachments/{attachmentId}/download-url?download=true
+```
+
+Open the returned short-lived URL immediately.
+
+### Assign, reassign, or unassign
+
+```http
+POST /api/v1/attachments/{attachmentId}/assign
+```
+
+Assign or reassign:
+
+```json
+{
+  "contactId": "contact-uuid"
+}
+```
+
+Return to Unassigned:
+
+```json
+{
+  "contactId": null
+}
+```
+
+### Soft delete and restore
+
+```http
+DELETE /api/v1/attachments/{attachmentId}
+POST /api/v1/attachments/{attachmentId}/restore
+```
+
+## Error handling
+
+The API uses `application/problem+json`. Display `title`, `detail`, and field-level `errors` when present. Also log or display the `X-Correlation-Id` response header for troubleshooting.
+
+Common statuses:
+
+- `400`: invalid request
+- `401`: missing, invalid, or expired login token
+- `404`: resource is not available to this tenant
+- `409`: duplicate contact or invalid attachment state
+- `413`: file too large
+- `415`: unsupported content type
+- `422`: S3 upload verification failed
+- `502`: S3 request failed
+
+## Recommended Base44 client wrapper
+
+Use one API helper so every protected call handles authorization and expiration consistently:
+
+```javascript
+const API_BASE_URL = "https://your-client-files-api.up.railway.app";
+
+async function apiFetch(path, options = {}) {
+  const token = sessionStorage.getItem("clientFilesAccessToken");
+  const headers = new Headers(options.headers || {});
+  headers.set("Accept", "application/json");
+
+  if (options.body && !(options.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers
+  });
+
+  if (response.status === 401) {
+    sessionStorage.removeItem("clientFilesAccessToken");
+    window.location.assign("/login");
+    throw new Error("Your session expired. Please sign in again.");
+  }
+
+  if (!response.ok) {
+    const problem = await response.json().catch(() => ({}));
+    throw new Error(problem.detail || problem.title || `Request failed: ${response.status}`);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+  return response.json();
+}
+```

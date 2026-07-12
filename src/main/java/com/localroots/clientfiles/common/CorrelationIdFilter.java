@@ -29,15 +29,10 @@ public class CorrelationIdFilter extends OncePerRequestFilter {
 
         try {
             MDC.put("correlationId", correlationId);
-            String tenant = request.getHeader("X-Tenant-Id");
-            if (tenant != null && !tenant.isBlank() && tenant.length() <= 100) {
-                MDC.put("tenant", tenant);
-            }
             response.setHeader(HEADER, correlationId);
             filterChain.doFilter(request, response);
         } finally {
             MDC.remove("correlationId");
-            MDC.remove("tenant");
         }
     }
 }

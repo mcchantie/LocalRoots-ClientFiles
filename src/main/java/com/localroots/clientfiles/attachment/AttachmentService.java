@@ -9,6 +9,7 @@ import com.localroots.clientfiles.api.InitializeUploadResponse;
 import com.localroots.clientfiles.api.PageResponse;
 import com.localroots.clientfiles.common.ApiException;
 import com.localroots.clientfiles.common.UploadVerificationException;
+import com.localroots.clientfiles.contact.ContactService;
 import com.localroots.clientfiles.security.ClientFilesSecurityProperties;
 import com.localroots.clientfiles.storage.S3StorageService;
 import org.springframework.data.domain.Page;
@@ -30,17 +31,20 @@ public class AttachmentService {
     private final AttachmentRepository repository;
     private final S3StorageService storageService;
     private final ClientFilesSecurityProperties securityProperties;
+    private final ContactService contactService;
     private final ObjectMapper objectMapper;
 
     public AttachmentService(
             AttachmentRepository repository,
             S3StorageService storageService,
             ClientFilesSecurityProperties securityProperties,
+            ContactService contactService,
             ObjectMapper objectMapper
     ) {
         this.repository = repository;
         this.storageService = storageService;
         this.securityProperties = securityProperties;
+        this.contactService = contactService;
         this.objectMapper = objectMapper;
     }
 
@@ -152,6 +156,7 @@ public class AttachmentService {
             UUID contactId,
             AttachmentCategory category,
             AttachmentStatus status,
+            boolean unassigned,
             boolean includeDeleted,
             int page,
             int size
@@ -162,6 +167,8 @@ public class AttachmentService {
         Specification<AttachmentEntity> specification = tenantSpecification(tenantId);
         if (contactId != null) {
             specification = specification.and((root, query, cb) -> cb.equal(root.get("contactId"), contactId));
+        } else if (unassigned) {
+            specification = specification.and((root, query, cb) -> cb.isNull(root.get("contactId")));
         }
         if (category != null) {
             specification = specification.and((root, query, cb) -> cb.equal(root.get("category"), category));
@@ -217,6 +224,15 @@ public class AttachmentService {
         return AttachmentResponse.from(entity, objectMapper);
     }
 
+    @Transactional
+    public AttachmentResponse assignToContact(UUID tenantId, UUID attachmentId, UUID contactId) {
+        AttachmentEntity entity = requireAttachment(tenantId, attachmentId);
+        requireNotDeleted(entity);
+        validateRelatedRecords(tenantId, contactId, null, null);
+        entity.assignContact(contactId);
+        return AttachmentResponse.from(entity, objectMapper);
+    }
+
     private AttachmentEntity requireAttachment(UUID tenantId, UUID attachmentId) {
         return repository.findByIdAndTenantId(attachmentId, tenantId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Attachment not found", "No attachment was found for this tenant."));
@@ -233,11 +249,13 @@ public class AttachmentService {
     }
 
     private void validateRelatedRecords(UUID tenantId, UUID contactId, UUID estimateId, UUID parentAttachmentId) {
-        if (contactId != null && !securityProperties.isAllowUnverifiedContactIds()) {
+        if (contactId != null
+                && !contactService.belongsToTenant(tenantId, contactId)
+                && !securityProperties.isAllowUnverifiedContactIds()) {
             throw new ApiException(
-                    HttpStatus.SERVICE_UNAVAILABLE,
-                    "Contact verification is not configured",
-                    "Contact-linked uploads are disabled until contact ownership can be verified against the CRM database. Upload without contactId or configure the CRM verifier."
+                    HttpStatus.NOT_FOUND,
+                    "Contact not found",
+                    "The selected contact does not exist for this tenant."
             );
         }
         if (estimateId != null && !securityProperties.isAllowUnverifiedEstimateIds()) {

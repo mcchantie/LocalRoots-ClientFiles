@@ -5,6 +5,8 @@ spring:
     import: optional:classpath:application-logging.yaml
   datasource:
     embedded-database-connection: none
+  flyway:
+    enabled: false
   jpa:
     open-in-view: false
     generate-ddl: false
@@ -14,7 +16,9 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+
 server:
+  port: ${PORT:8080}
   shutdown: graceful
   error:
     include-message: never
@@ -29,8 +33,16 @@ storage:
     allowed-content-types: image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,video/mp4,video/quicktime
 
 client-files:
+  auth:
+    admin-username: ${CLIENT_FILES_ADMIN_USERNAME:admin}
+    admin-password: ${CLIENT_FILES_ADMIN_PASSWORD:}
+    tenant-id: ${CLIENT_FILES_TENANT_ID:}
+    jwt-secret-base64: ${CLIENT_FILES_JWT_SECRET_BASE64:}
+    jwt-issuer: ${CLIENT_FILES_JWT_ISSUER:client-files-api}
+    access-token-ttl: ${CLIENT_FILES_ACCESS_TOKEN_TTL:8h}
   cors:
     allowed-origins: ${CLIENT_FILES_ALLOWED_ORIGINS:}
+    allowed-origin-patterns: ${CLIENT_FILES_ALLOWED_ORIGIN_PATTERNS:}
   security:
     allow-tenant-header: ${CLIENT_FILES_ALLOW_TENANT_HEADER:false}
     allow-unverified-contact-ids: ${CLIENT_FILES_ALLOW_UNVERIFIED_CONTACT_IDS:false}
