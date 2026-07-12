@@ -1,7 +1,7 @@
 logging:
   level:
     root: INFO
-    com.localroots.backend: DEBUG
+    com.localroots.clientfiles: DEBUG
     org.springframework.web: INFO
     org.hibernate.SQL: WARN
     org.hibernate.orm.jdbc.bind: WARN

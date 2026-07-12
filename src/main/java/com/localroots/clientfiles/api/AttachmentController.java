@@ -1,0 +1,109 @@
+package com.localroots.clientfiles.api;
+
+import com.localroots.clientfiles.attachment.AttachmentCategory;
+import com.localroots.clientfiles.attachment.AttachmentService;
+import com.localroots.clientfiles.attachment.AttachmentStatus;
+import com.localroots.clientfiles.security.RequestTenantResolver;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import org.springframework.http.HttpStatus;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/v1/attachments")
+@Validated
+public class AttachmentController {
+
+    private final AttachmentService attachmentService;
+    private final RequestTenantResolver tenantResolver;
+
+    public AttachmentController(AttachmentService attachmentService, RequestTenantResolver tenantResolver) {
+        this.attachmentService = attachmentService;
+        this.tenantResolver = tenantResolver;
+    }
+
+    @PostMapping("/uploads")
+    @ResponseStatus(HttpStatus.CREATED)
+    public InitializeUploadResponse initializeUpload(
+            HttpServletRequest servletRequest,
+            @Valid @RequestBody InitializeUploadRequest request
+    ) {
+        return attachmentService.initializeUpload(tenantResolver.requireTenantId(servletRequest), request);
+    }
+
+    @PostMapping("/{attachmentId}/complete")
+    public AttachmentResponse completeUpload(
+            HttpServletRequest request,
+            @PathVariable UUID attachmentId
+    ) {
+        return attachmentService.completeUpload(tenantResolver.requireTenantId(request), attachmentId);
+    }
+
+    @GetMapping("/{attachmentId}")
+    public AttachmentResponse getAttachment(
+            HttpServletRequest request,
+            @PathVariable UUID attachmentId,
+            @RequestParam(defaultValue = "false") boolean includeDeleted
+    ) {
+        return attachmentService.get(tenantResolver.requireTenantId(request), attachmentId, includeDeleted);
+    }
+
+    @GetMapping
+    public PageResponse<AttachmentResponse> listAttachments(
+            HttpServletRequest request,
+            @RequestParam(required = false) UUID contactId,
+            @RequestParam(required = false) AttachmentCategory category,
+            @RequestParam(required = false) AttachmentStatus status,
+            @RequestParam(defaultValue = "false") boolean includeDeleted,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size
+    ) {
+        return attachmentService.list(
+                tenantResolver.requireTenantId(request),
+                contactId,
+                category,
+                status,
+                includeDeleted,
+                page,
+                size
+        );
+    }
+
+    @PostMapping("/{attachmentId}/download-url")
+    public DownloadUrlResponse createDownloadUrl(
+            HttpServletRequest request,
+            @PathVariable UUID attachmentId,
+            @RequestParam(defaultValue = "false") boolean download
+    ) {
+        return attachmentService.createDownloadUrl(tenantResolver.requireTenantId(request), attachmentId, download);
+    }
+
+    @DeleteMapping("/{attachmentId}")
+    public AttachmentResponse deleteAttachment(
+            HttpServletRequest request,
+            @PathVariable UUID attachmentId
+    ) {
+        return attachmentService.softDelete(tenantResolver.requireTenantId(request), attachmentId);
+    }
+
+    @PostMapping("/{attachmentId}/restore")
+    public AttachmentResponse restoreAttachment(
+            HttpServletRequest request,
+            @PathVariable UUID attachmentId
+    ) {
+        return attachmentService.restore(tenantResolver.requireTenantId(request), attachmentId);
+    }
+}

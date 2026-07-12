@@ -7,4 +7,31 @@
 storage:
   s3:
     bucket: ${CLIENT_FILES_S3_BUCKET_DEV}
-    region: us-east-2
+    region: ${AWS_REGION:us-east-2}
+
+client-files:
+  cors:
+    allowed-origins:
+      - http://localhost:3000
+      - http://localhost:5173
+  security:
+    allow-tenant-header: true
+    allow-unverified-contact-ids: true
+    allow-unverified-estimate-ids: true
+
+spring:
+  datasource:
+    url: ${LOCALROOTS_DEV_DB_URL}
+    username: ${LOCALROOTS_DEV_DB_USER}
+    password: ${LOCALROOTS_DEV_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: no
+
+server:
+  port: 8080

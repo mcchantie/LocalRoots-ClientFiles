@@ -4,7 +4,10 @@ spring:
   config:
     import: optional:classpath:application-logging.yaml
   datasource:
-    embedded-database-connection: none
+    url: ${LOCALROOTS_DEV_DB_URL}
+    username: ${LOCALROOTS_DEV_DB_USER}
+    password: ${LOCALROOTS_DEV_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
   jpa:
     open-in-view: false
     generate-ddl: false
@@ -21,7 +24,7 @@ server:
 
 storage:
   s3:
-    bucket: ${CLIENT_FILES_S3_BUCKET}
+    bucket: ${CLIENT_FILES_S3_BUCKET_DEV}
     region: ${AWS_REGION:us-east-2}
     upload-url-ttl: ${CLIENT_FILES_UPLOAD_URL_TTL:15m}
     download-url-ttl: ${CLIENT_FILES_DOWNLOAD_URL_TTL:5m}
