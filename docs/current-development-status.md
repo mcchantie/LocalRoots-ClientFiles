@@ -1,210 +1,136 @@
 # Client Files Current Development Status
 
-**Last updated:** July 10, 2026
-
-## Product Overview
-
-**Client Files** is the planned Local Roots CRM application for storing, uploading, viewing, searching, organizing, and retrieving client-related files.
-
-It will support:
-
-- Photos
-- Videos
-- Estimate documents
-- LandGlide screenshots
-- General documents
-- Files connected to existing contacts
-- Files connected while creating a new contact
-- Temporarily unassigned uploads
-
-The pricing calculator is being renamed **Estimater**.
+**Last updated:** July 11, 2026
 
 ## Current Phase
 
-AWS storage foundation and local Spring Boot S3 integration.
+The first Client Files backend structure is implemented. The immediate focus is validating local access to the development S3 bucket, inspecting the existing AWS development database, and designing database integration without automatic migrations.
 
-The development and production S3 buckets and initial IAM identities have been created. No presigned upload endpoint, upload-completion endpoint, processing worker, or Client Files frontend has been implemented yet.
+## Environment Placement
 
-## Confirmed Architecture
+| Environment | Application | PostgreSQL database | S3 |
+|---|---|---|---|
+| Development | Local machine | Existing AWS development database | Development Client Files bucket |
+| Production | Railway | Railway PostgreSQL | Production Client Files bucket |
 
-### Environments
+Development and production must use separate AWS credentials, JDBC credentials, buckets, configuration, and data.
 
-Use two environments initially:
+The AWS development database is not currently planned to move to Railway. Railway production database setup and any required data transfer will be planned separately.
 
-- Development
-- Production
+## Backend Implemented
 
-Development and production use separate S3 buckets, credentials, database configurations, and deployments. The environment holding real business data is production. UAT remains deferred.
+- AWS SDK for Java v2 S3 integration
+- Shared `S3Client` and `S3Presigner` Spring beans
+- AWS default credential provider chain
+- Tenant-scoped S3 object keys
+- Presigned direct `PutObject` uploads
+- Required signed upload headers
+- `HeadObject` upload-completion verification
+- Size, MIME type, ETag, and optional SHA-256 metadata handling
+- Short-lived presigned view and download URLs
+- Attachment categories and processing/status model
+- Tenant-scoped retrieval and filtering structure
+- Soft deletion and restoration behavior
+- Fail-closed production authorization boundary until login/JWT integration is connected
+- API error-handling structure
+- Railway-compatible production packaging
 
-### S3 Foundation
+## Database Safety Status
 
-- AWS region: **`us-east-2`**
-- Separate development and production Client Files buckets created
-- Block Public Access enabled
-- Object Ownership set to bucket-owner-enforced
-- ACLs disabled
-- Versioning enabled
-- Objects remain private
-- Bucket names identify the application and environment and include globally unique account, region, or suffix information
+No database migration tool or migration file is included.
 
-### IAM and Credentials
+- No Flyway
+- No Liquibase
+- No automatic SQL migration
+- `spring.jpa.generate-ddl=false`
+- `spring.jpa.hibernate.ddl-auto=none`
 
-- Separate application IAM identities are used for development and production.
-- Planned service-user names:
-  - `localroots-client-files-dev-app`
-  - `localroots-client-files-prod-app`
-- Planned bucket-scoped policy names:
-  - `LocalRootsClientFilesDevS3Policy`
-  - `LocalRootsClientFilesProdS3Policy`
-- The human `Developers` group currently has `AmazonS3FullAccess` for development-console work.
-- Application runtime credentials should use the restricted environment-specific policies instead of the broad developer-group policy.
-- Local and Railway configuration will use:
-  - `AWS_ACCESS_KEY_ID`
-  - `AWS_SECRET_ACCESS_KEY`
-  - `AWS_REGION`
-  - `CLIENT_FILES_S3_BUCKET`
-- Secret keys must not be committed to `application.yml`, source control, or the database.
-- The AWS SDK default credential provider chain will resolve the credentials.
+Application startup will not create, update, migrate, or validate tables. The existing AWS development database must be inspected before attachment or contact schema changes are designed.
 
-### Railway and Database Placement
+Future database changes will be explicitly reviewed before they run.
 
-- The backend will initially remain on Railway.
-- The current Railway plan can access S3 over outbound HTTPS; no plan upgrade or static outbound IP is required for S3.
-- The existing PostgreSQL database remains in AWS RDS for now.
-- A migration from AWS RDS to Railway PostgreSQL is planned but deferred while S3 uploads are implemented.
-- Do not delete the RDS database until backup, migration, validation, cutover, and rollback checks are complete.
+## Contact Model Requirement
 
-### Spring Boot AWS Configuration
+Contacts must be allowed to exist without names.
 
-- Use AWS SDK for Java v2.
-- Adding the project dependency is sufficient; there is no separate machine-wide SDK installation.
-- Create shared `S3Client` and `S3Presigner` beans in:
-  - `src/main/java/com/localroots/crm/config/S3Config.java`
-  - Package `com.localroots.crm.config`
-- Region and bucket may be referenced from Spring configuration; credentials remain in the AWS default provider chain.
+- First name, last name, and display name must be nullable where applicable.
+- A nameless contact may be created with only a phone number or only an email address.
+- Attachments and estimate screenshots should link to the contact's database ID.
+- A name added later should update the same contact.
+- Phone numbers and email addresses should be normalized for matching and duplicate prevention.
+- Display fallback: name, then phone number, then email address, then `Unnamed contact`.
 
-### Upload Flow
+The existing contacts schema and backend validation must be checked for name requirements before the future production database work begins.
 
-1. Frontend requests an upload from Spring Boot.
-2. Backend validates tenant and contact context.
-3. Backend creates a pending attachment record.
-4. Backend returns a presigned S3 upload URL.
-5. Frontend uploads directly to S3.
-6. Frontend confirms completion.
-7. Backend verifies the object.
-8. Backend marks the file ready or sends it for processing.
+## S3 Configuration
 
-### Storage Boundary
+Non-secret S3 settings may remain in `application.properties`:
 
-- Amazon S3 stores file objects.
-- PostgreSQL stores attachment metadata, relationships, search fields, processing state, and analytics data.
-- The database provider may move from AWS RDS to Railway without changing the S3/metadata separation.
+```properties
+storage.s3.region=us-east-2
+storage.s3.bucket=<development-bucket-name>
+storage.s3.max-file-size=100MB
+storage.s3.upload-url-ttl=15m
+storage.s3.download-url-ttl=15m
+storage.s3.allowed-content-types=image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,video/mp4,video/quicktime
+```
 
-### Contact Assignment
+AWS credentials must remain outside committed application properties:
 
-Uploads may be:
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
 
-- Assigned to an existing contact
-- Assigned while creating a new contact
-- Left temporarily unassigned
+No standalone AWS SDK installation is required. The AWS SDK for Java v2 is supplied through the Maven or Gradle dependency.
 
-### Attachment Categories
+## IntelliJ Credential Configuration
 
-- Estimates
-- LandGlide
-- Property Photos
-- Videos
-- Documents
-- Other
+The active Spring Boot or JUnit run configuration should use IntelliJ's parent-variable syntax:
 
-### LandGlide Processing
+```text
+AWS_ACCESS_KEY_ID=$LOCALROOTS_CLIENT_FILES_ACCESS_KEY_DEV$
+AWS_SECRET_ACCESS_KEY=$LOCALROOTS_CLIENT_FILES_SECRET_ACCESS_KEY_DEV$
+```
 
-- Preserve the original screenshot.
-- Create a separate cropped derivative.
-- Link processed output to the original.
-- Start with a fixed crop profile based on screenshot dimensions.
-- Add preview or manual adjustment if needed.
-- Test click, drag, copy, and paste into Quo before building any Quo-specific integration.
+`${VARIABLE_NAME}` is shell/property-placeholder syntax and was being passed literally by IntelliJ in this context.
 
-### Estimater Integration
+Spring Boot and JUnit run configurations are separate. Credentials added to one configuration are not automatically guaranteed to exist in another. IntelliJ must also inherit the parent `LOCALROOTS_CLIENT_FILES_*` variables.
 
-Estimater should save both:
+## Immediate Test
 
-- A generated estimate document in S3
-- Structured estimate data in PostgreSQL
+Run an S3-only smoke test that performs:
 
-Structured data should include lawn size, materials, services, discounts, totals, calculator inputs/outputs, pricing version, status, and revisions.
+1. `PutObject` to the development bucket
+2. `HeadObject` for the uploaded key
+3. Confirmation in the AWS S3 console
 
-## S3 Console Clarification
+This test does not require the attachment database table. Successful Spring Boot startup alone does not prove that the AWS credentials work because the SDK may not contact S3 until an operation is invoked.
 
-`AmazonS3FullAccess` already includes S3 tagging actions. The **Actions → Edit tags** command on the Objects page is disabled when the bucket has no objects or no object is selected. Bucket-level tags are managed from the bucket **Properties** page.
+## Important Security Boundary
 
-## Work Completed
+Authentication is not yet integrated.
 
-- Named the application Client Files.
-- Renamed the pricing calculator concept to Estimater.
-- Defined the initial development and production environment strategy.
-- Defined S3 for file bytes and PostgreSQL for metadata.
-- Created separate development and production S3 buckets in `us-east-2`.
-- Established private access, versioning, and ACL-disabled bucket settings.
-- Created environment-specific IAM policies and application users.
-- Attached `AmazonS3FullAccess` to the human `Developers` group.
-- Confirmed that no extra tag-editing policy is needed for the developer user.
-- Confirmed that Railway can access S3 without upgrading the current plan.
-- Deferred and documented the AWS RDS-to-Railway PostgreSQL migration.
-- Defined the environment-variable credential strategy and local AWS verification process.
-- Chosen the location for the shared Spring `S3Client` and `S3Presigner` beans.
-- Defined upload assignment options, categories, LandGlide handling, and Estimater structured-data requirements.
+Any temporary tenant header or unverified contact/estimate relationship must remain development-only. Production must resolve tenant and uploader identity from authenticated claims and verify that related contacts and estimates belong to that tenant.
 
-## Immediate Next Step
+## Immediate Next Steps
 
-Add AWS SDK for Java v2 to the Spring Boot backend and create `com.localroots.crm.config.S3Config` with reusable `S3Client` and `S3Presigner` beans. Then configure the development environment variables and run a controlled local S3 access test.
+1. Correct and verify IntelliJ credential substitution.
+2. Run the development-bucket S3 smoke test.
+3. Inspect the existing AWS development database schema.
+4. Identify current database and Java validation that requires contact names.
+5. Design nullable-name and attachment schema changes for explicit review.
+6. Connect the local app to the AWS development database only after the expected schema is understood.
+7. Plan Railway production PostgreSQL setup separately.
+8. Add authenticated tenant/contact/estimate authorization.
+9. Build the Client Files frontend upload screen and gallery.
 
-## Next Implementation Checklist
+## Deferred Work
 
-- [x] Choose AWS region.
-- [x] Choose the S3 bucket naming approach.
-- [x] Create the production S3 bucket.
-- [x] Enable Block Public Access.
-- [x] Enable S3 versioning.
-- [x] Create the development S3 bucket.
-- [x] Create environment-specific IAM policies and application users.
-- [x] Confirm the human developer group's S3 permissions.
-- [x] Decide how local and Railway AWS credentials will be supplied.
-- [x] Decide where `S3Client` and `S3Presigner` beans will live.
-- [ ] Add the AWS SDK for Java v2 S3 dependency.
-- [ ] Create `S3Config` with `S3Client` and `S3Presigner` beans.
-- [ ] Configure local development environment variables.
-- [ ] Verify credentials with `aws sts get-caller-identity`.
-- [ ] Complete a development-bucket upload/read/delete smoke test.
-- [ ] Inspect the existing database schema.
-- [ ] Confirm the current `contact_attachments` columns and constraints.
-- [ ] Finalize attachment and upload-session schema.
-- [ ] Implement authentication and tenant authorization needed for production files.
-- [ ] Implement presigned upload initialization.
-- [ ] Implement upload completion verification.
-- [ ] Build the first Client Files upload interface.
-- [ ] Build the contact file gallery.
-- [ ] Test LandGlide copy, drag, and paste behavior with Quo.
-- [ ] Implement the first LandGlide crop profile.
-- [ ] Define and create Estimater relational tables.
-- [ ] Generate and store estimate documents.
-- [ ] Add soft deletion, restore, logging, lifecycle rules, and backup checks.
-- [ ] Plan and execute the AWS RDS-to-Railway PostgreSQL migration after S3 integration is stable.
-
-## Open Questions to Resolve Soon
-
-- Exact AWS SDK v2 dependency/BOM version for the existing backend build
-- Whether the development access keys and CLI verification are complete
-- Existing database schema and attachment-table design
-- Exact first-release S3 permissions required by the application
-- Production secret storage and rotation in Railway
-- Accepted file types and size limits
-- Video multipart-upload timing
-- HEIC handling
-- LandGlide crop dimensions and output format
-- Unassigned-upload cleanup policy
-- S3 lifecycle rules for abandoned uploads and noncurrent versions
-- Estimate statuses and versioning details
-- Timing and runbook for the RDS-to-Railway PostgreSQL migration
-- Production authentication readiness
+- Automatic or reviewed database migration implementation
+- Multipart video uploads
+- Abandoned-upload cleanup
+- Malware and file-signature inspection
+- Thumbnail generation
+- LandGlide crop processing
+- Physical S3 purge after retention
+- Estimate PDF generation and structured Estimater tables
+- Production login and admin/tenant dashboard integration

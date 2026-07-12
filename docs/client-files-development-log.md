@@ -241,3 +241,111 @@ Create the AWS storage foundation for Client Files, establish safe IAM and crede
 11. Add the development secrets to Railway only after local testing succeeds.
 12. Plan and document the AWS RDS-to-Railway PostgreSQL migration separately; keep the existing RDS database until cutover is validated.
 
+
+---
+
+## Session: July 11, 2026
+
+### Session Goal
+
+Implement the initial Client Files backend and establish safe S3, configuration, database, environment, and contact-model rules without allowing automatic database changes.
+
+### Questions Discussed
+
+- Can the backend be written before the Railway production database is configured?
+- How should direct browser uploads to private S3 buckets work?
+- How should the backend verify that a presigned upload actually completed?
+- Should Flyway or another migration tool be introduced before the existing CRM schema is inspected?
+- Could Hibernate create, update, or validate tables automatically at startup?
+- Where will the development and production applications and databases run?
+- Can contacts exist without names?
+- How should attachments be retained for leads identified only by phone number or email address?
+- Can S3 region and bucket values remain in `application.properties`?
+- Which AWS values are secret and which are ordinary environment-specific configuration?
+- Does AWS SDK for Java need to be installed separately?
+- Can `S3Config` rely on the AWS default credential provider chain?
+- How should `S3StorageService` obtain the bucket, limits, URL durations, and allowed content types?
+- How can S3 access be tested before the attachment database table exists?
+- Why did IntelliJ pass `${LOCALROOTS_CLIENT_FILES_ACCESS_KEY_DEV}` literally instead of evaluating it?
+- Do Spring Boot and JUnit run configurations share environment variables automatically?
+
+### Design Decisions
+
+- Do not add Flyway, Liquibase, SQL migration files, or other automatic database migrations yet.
+- Disable Hibernate schema generation and validation with `ddl-auto=none` and `generate-ddl=false`.
+- Inspect the existing CRM schema and explicitly review future database changes before any SQL runs.
+- Production application and production PostgreSQL will run on Railway.
+- The development application will run locally and connect to the existing AWS development database.
+- H2 is not the intended development database; it may remain useful only for isolated tests.
+- Development and production retain separate S3 buckets, credentials, databases, and configuration.
+- Contacts may have nullable name fields.
+- A nameless contact may be identified by only a phone number or only an email address.
+- Attachments will link to a contact record through `contact_id`, allowing the same record to receive a name later.
+- Phone numbers and emails should be normalized for matching and duplicate prevention.
+- Use AWS SDK for Java v2 through the project dependency; no machine-wide SDK installation is required.
+- Keep `S3Client` and `S3Presigner` as shared Spring beans in `S3Config`.
+- Allow S3 region, bucket, limits, TTLs, and accepted MIME types in `application.properties` because they are not secrets.
+- Keep `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` outside committed properties and resolve them through the AWS default credential chain.
+- Use a single presigned `PutObject` upload initially and verify completion with `HeadObject`.
+- Keep S3 objects private and use short-lived presigned GET URLs for viewing and downloading.
+- Use application-level soft deletion initially and do not physically delete S3 objects yet.
+- Test S3 independently with a controlled `PutObject` and `HeadObject` smoke test before the attachment schema exists.
+- IntelliJ parent-environment references use `$VARIABLE_NAME$`, not shell-style `${VARIABLE_NAME}`.
+- Spring Boot and JUnit configurations are separate; each configuration that needs AWS credentials must receive them or inherit them through a shared template.
+
+### Work Completed
+
+- Produced the first Client Files Spring Boot backend implementation.
+- Added AWS SDK for Java v2 S3 support.
+- Added shared `S3Client` and `S3Presigner` bean configuration using the default credential provider chain.
+- Implemented tenant-scoped S3 key generation.
+- Implemented presigned upload initialization.
+- Implemented `HeadObject` upload verification, including size, content type, ETag, and optional SHA-256 checksum handling.
+- Implemented short-lived presigned view and download URLs.
+- Implemented attachment categories, statuses, metadata behavior, listing, filtering, soft deletion, and restoration in the Java model.
+- Added fail-closed tenant behavior outside local development until authentication is integrated.
+- Removed the generated database migration file and Flyway dependencies.
+- Disabled automatic Hibernate schema creation, updates, and validation.
+- Confirmed that application startup will not automatically alter the database.
+- Updated the environment model to local application plus AWS development database for development, and Railway application plus Railway PostgreSQL for production.
+- Defined nullable-name contact behavior for phone-only and email-only leads.
+- Kept S3 region and bucket as Spring application properties while reserving environment variables for AWS credentials.
+- Prepared an `S3StorageService` version that injects S3 configuration directly from Spring properties.
+- Defined an S3 smoke-test runner that can verify access without an attachment database table.
+- Diagnosed IntelliJ environment-variable substitution and corrected the run-configuration syntax to:
+  - `AWS_ACCESS_KEY_ID=$LOCALROOTS_CLIENT_FILES_ACCESS_KEY_DEV$`
+  - `AWS_SECRET_ACCESS_KEY=$LOCALROOTS_CLIENT_FILES_SECRET_ACCESS_KEY_DEV$`
+
+### Unresolved Questions
+
+- What are the exact columns, constraints, keys, and relationships in the existing AWS development database?
+- Does the current contacts table require a first name, last name, or display name?
+- Which current backend validations also require a contact name?
+- Should the existing `contact_attachments` table be extended or replaced by a new attachment table?
+- What reviewed migration approach will eventually be used for the Railway production database?
+- How will development data, production seed data, or production records be transferred safely to Railway if needed?
+- Which login/JWT claims will supply tenant and uploader identity?
+- What production frontend origins should be allowed by API and S3 CORS?
+- What final file-size limits and MIME types should be used?
+- When should multipart uploads be introduced for large videos?
+- How should abandoned uploads, noncurrent S3 versions, and soft-deleted files be cleaned up?
+- When should thumbnail and LandGlide crop processing be added?
+- Are the parent `LOCALROOTS_CLIENT_FILES_*` credential variables visible to the IntelliJ process and to the exact JUnit/Spring Boot run configurations being used?
+
+### Next Steps
+
+1. Correct the IntelliJ environment-variable references and confirm the source variables are inherited by the active run configuration.
+2. Run the controlled S3 `PutObject`/`HeadObject` smoke test against the development bucket.
+3. Verify the test object appears under the expected development tenant prefix in S3.
+4. Inspect the AWS development database schema, especially contacts, tenants, users, estimates, and `contact_attachments`.
+5. Identify every database and backend rule that currently requires a contact name.
+6. Design the reviewed schema change that allows phone-only and email-only contacts without adding automatic migration execution.
+7. Decide how attachment metadata should integrate with the existing CRM schema.
+8. Connect the local development application to the AWS development database after the expected schema is understood.
+9. Plan the Railway production database setup and any required data transfer separately.
+10. Integrate authenticated tenant, user, contact, and estimate authorization.
+11. Build the first Client Files upload and gallery interface.
+
+### Session End State
+
+The S3 integration structure is ready for a live development-bucket smoke test. Database automation is disabled, no migration files are present, and no attachment schema will be applied until the existing CRM database is inspected and the changes are reviewed. The environment topology and nameless-contact requirements are now explicitly documented.

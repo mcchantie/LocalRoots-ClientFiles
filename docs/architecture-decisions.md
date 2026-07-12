@@ -373,50 +373,60 @@ If the backend later runs on AWS infrastructure that supports IAM roles, replace
 
 ---
 
-## ADR-019: AWS Credentials Are Supplied Through the Default Credential Chain
+## ADR-019: AWS Credentials Use the Default Credential Chain
 
-**Status:** Accepted
+**Status:** Accepted; clarified July 11, 2026
 
-The Spring Boot application will use the AWS SDK default credential provider chain rather than reading secret keys from custom application properties.
+The Spring Boot application will use the AWS SDK for Java v2 default credential provider chain. Access keys will not be read from custom Spring properties or committed to source control.
 
-### Local and Railway Configuration
+### Configuration Boundary
 
-Use environment variables such as:
+The following values are non-secret and may be stored in environment-specific `application.properties` files or overridden through environment variables:
+
+- `storage.s3.region`
+- `storage.s3.bucket`
+- Upload and download URL durations
+- Maximum file size
+- Allowed MIME types
+
+The following credentials must remain outside committed application configuration:
 
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
-- `CLIENT_FILES_S3_BUCKET`
 
-Bucket and region configuration may be referenced by Spring configuration, but access keys must not be committed to `application.yml`, source control, or the database.
+For local development, the credentials may be supplied through the IDE run configuration or a local AWS credentials profile. Railway production credentials will be stored as Railway environment variables.
+
+### Rationale
+
+Bucket names and regions are configuration, not secrets. Keeping credentials in the AWS default credential chain avoids custom secret handling and lets the same `S3Client` and `S3Presigner` configuration work locally and on Railway.
 
 ### Verification
 
-Before application testing, verify the active identity and development-bucket access with the AWS CLI, including `aws sts get-caller-identity` and a controlled S3 upload/delete test.
+A real S3 operation must be performed to verify credentials. Merely starting Spring Boot may not contact AWS. Initial verification should use a controlled `PutObject` and `HeadObject` smoke test against the development bucket.
 
 ---
 
-## ADR-020: Initial Railway Hosting and Deferred PostgreSQL Migration
+## ADR-020: Environment Deployment and Database Placement
 
-**Status:** Accepted; migration deferred
+**Status:** Accepted; clarified July 11, 2026
 
-The Local Roots backend will initially continue running on Railway because Texas Top Dressing is currently the only operational tenant.
+The initial environment placement is:
 
-Amazon S3 can be accessed from the current Railway plan through normal outbound HTTPS using IAM credentials; a static outbound IP is not required for S3 access.
+| Environment | Application | PostgreSQL database |
+|---|---|---|
+| Development | Local machine | Existing AWS-hosted development database |
+| Production | Railway | Railway PostgreSQL |
 
-The existing PostgreSQL database is currently hosted in AWS RDS. A migration from AWS RDS to Railway PostgreSQL is planned because connecting a Railway deployment to a tightly restricted external RDS instance is inconvenient without a stable outbound IP.
+Development and production will continue to use separate S3 buckets, AWS credentials, JDBC credentials, and application configuration.
 
-### Migration Safety Requirements
+### Consequences
 
-- Do not delete the AWS RDS database before migration and validation are complete.
-- Take a backup before migration.
-- Copy data to Railway PostgreSQL.
-- Validate schema, row counts, application reads, and writes.
-- Keep a rollback path until the Railway database is confirmed stable.
-
-### Deferred Work
-
-The migration is documented but will not be performed during the current S3 upload implementation phase.
+- The development application will connect to the existing AWS development database when database-backed development begins.
+- H2 may be used for isolated tests, but it is not the intended development database.
+- The production application and production database will be deployed together on Railway.
+- Moving or creating production data in Railway is a separate, explicitly planned database task.
+- The AWS development database is not assumed to move to Railway.
+- No AWS database may be deleted as part of production setup without a reviewed backup, validation, and rollback plan.
 
 ---
 
@@ -428,10 +438,155 @@ The backend will use AWS SDK for Java v2. Adding the required Maven or Gradle de
 
 `S3Client` and `S3Presigner` will be configured once as Spring beans in:
 
-- File: `src/main/java/com/localroots/crm/config/S3Config.java`
-- Package: `com.localroots.crm.config`
+- File: `src/main/java/com/localroots/clientfiles/config/S3Config.java`
+- Package: `com.localroots.clientfiles.config`
 
 ### Rationale
 
 Central bean configuration keeps region and credential behavior consistent and allows upload, verification, download, and presigning services to reuse the same clients.
+
+
+
+---
+
+## ADR-022: Attachment Schema Integration Is Deferred
+
+**Status:** Amended July 11, 2026
+
+The backend contains an attachment metadata entity and repository, but it will not create or modify database tables yet. The existing CRM tenant, contact, estimate, user, and `contact_attachments` schema must be inspected before choosing whether to extend an existing table or create a new one.
+
+### Rationale
+
+The current backend archive does not contain the existing CRM database schema. Creating a parallel table or assuming columns on an operational table could produce an incompatible design.
+
+### Consequences
+
+- No database migration file is included.
+- No attachment table is created automatically.
+- Contact and estimate IDs remain UUID fields in the Java model until real relationships are designed.
+- Database-backed attachment endpoints require a compatible table to be created later through an explicitly reviewed process.
+
+---
+
+## ADR-023: Development Tenant Headers Are Explicitly Non-Production
+
+**Status:** Accepted
+
+The local profile may resolve tenant identity from `X-Tenant-Id` so the upload API can be tested before login integration is complete.
+
+Outside the local profile, tenant-header authorization and unverified contact or estimate IDs are disabled by default.
+
+### Rationale
+
+A caller-supplied tenant ID is not authentication. The backend must fail closed rather than accidentally treating a request header as production tenant authorization.
+
+### Consequences
+
+- Production requests remain unavailable until authenticated tenant resolution is connected.
+- Contact- and estimate-linked uploads remain unavailable in production until ownership checks are implemented.
+- Unassigned uploads can still be modeled without inventing CRM schema.
+
+---
+
+## ADR-024: Upload Completion Requires S3 Verification
+
+**Status:** Accepted
+
+An attachment is not marked `READY` merely because the frontend reports success. The backend performs `HeadObject` and validates the stored object against the initialized upload.
+
+### Initial Verification
+
+- Expected bucket and tenant key prefix
+- Exact declared file size
+- Expected content type
+- Optional base64 SHA-256 checksum
+
+### Rationale
+
+Presigned URLs can expire, uploads can fail, and the completion call must not create a ready database record for a missing or mismatched S3 object.
+
+---
+
+## ADR-025: Soft Delete Does Not Physically Delete S3 Objects Initially
+
+**Status:** Accepted
+
+The first release only sets `deleted_at` in PostgreSQL. It does not call `DeleteObject` in S3.
+
+### Rationale
+
+This aligns with the recovery requirement and avoids granting runtime delete permission before retention and restore rules are finalized.
+
+### Consequences
+
+- The initial application IAM policy does not require `s3:DeleteObject`.
+- A later purge workflow may remove objects after a retention period.
+- S3 versioning remains a second recovery layer.
+
+---
+
+## ADR-026: Initial Uploads Use a Single Presigned PUT
+
+**Status:** Accepted
+
+The first release uses a single presigned `PutObject` request with a configurable maximum file size. The initial default is 500 MB.
+
+### Rationale
+
+This is sufficient for the first photo, document, and moderate video workflows while keeping the API small. Multipart upload can be added when real video sizes justify the added state and cleanup logic.
+
+### Consequences
+
+- Allowed MIME types and maximum size are configuration-driven.
+- Multipart upload, abandoned-part cleanup, and resume support remain future work.
+
+---
+
+## ADR-027: No Automatic Database Schema Management Yet
+
+**Status:** Accepted; supersedes the earlier Flyway decision
+
+Client Files will not use Flyway, Liquibase, migration files, or Hibernate schema generation at this stage.
+
+### Rationale
+
+The database design has not been reconciled with the existing Local Roots CRM schema, and automatic startup behavior should not make or validate database changes before that design is understood and approved.
+
+### Consequences
+
+- Flyway dependencies and migration files are absent.
+- Hibernate uses `ddl-auto=none` and `generate-ddl=false`.
+- Application startup does not create, update, migrate, or validate tables.
+- The schema approach will be chosen later after the CRM database is inspected.
+- Database-backed endpoints will require the expected schema before they can be exercised.
+
+---
+
+## ADR-028: Contacts May Be Nameless
+
+**Status:** Accepted
+
+A Local Roots CRM contact may exist without a first name, last name, or display name. Attachments, estimate screenshots, and communication history may be linked to a contact identified only by a phone number or only by an email address.
+
+### Rationale
+
+Some estimate recipients and leads never provide a name or never respond. Their phone number, email address, estimate screenshots, and related files are still operationally useful if they respond later.
+
+### Data Rules
+
+- Contact name fields must remain nullable in the future schema.
+- When no name is present, at least one usable identifier must exist: phone number or email address.
+- Attachments should reference the contact record by `contact_id`, not store a raw phone number or email as the attachment relationship.
+- Phone numbers and email addresses should be normalized for matching and duplicate prevention.
+- Adding a name later updates the existing contact rather than creating a second contact.
+- Any future migration, entity validation, API validation, and frontend form validation must preserve this behavior.
+
+### Display Fallback
+
+The interface should identify a contact using this order:
+
+1. Name
+2. Phone number
+3. Email address
+4. `Unnamed contact`
 
