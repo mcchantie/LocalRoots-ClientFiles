@@ -63,9 +63,7 @@ public class AttachmentService {
         String displayName = request.displayName() == null || request.displayName().isBlank()
                 ? request.originalFileName().trim()
                 : request.displayName().trim();
-        String sourceSystem = request.sourceSystem() == null || request.sourceSystem().isBlank()
-                ? "manual"
-                : request.sourceSystem().trim().toLowerCase(Locale.ROOT);
+        String sourceSystem = normalizeSourceSystem(request.sourceSystem());
 
         String metadataJson = toJson(request.metadata());
         String key = storageService.buildAttachmentKey(
@@ -369,6 +367,26 @@ public class AttachmentService {
         } catch (JacksonException exception) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid metadata", "Metadata could not be serialized as JSON.");
         }
+    }
+
+    private String normalizeSourceSystem(String value) {
+        if (value == null || value.isBlank()) {
+            return "MANUAL";
+        }
+
+        String normalized = value.trim().toUpperCase(Locale.ROOT);
+        if (normalized.equals("BASE44") || normalized.equals("CLIENT_FILES") || normalized.equals("CLIENT-FILES")) {
+            return "MANUAL";
+        }
+
+        return switch (normalized) {
+            case "QUO", "FACEBOOK", "JOBBER", "WEBSITE", "GMAIL", "MANUAL" -> normalized;
+            default -> throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "Unsupported source system",
+                    "Use one of QUO, FACEBOOK, JOBBER, WEBSITE, GMAIL, or MANUAL."
+            );
+        };
     }
 
     private String blankToNull(String value) {

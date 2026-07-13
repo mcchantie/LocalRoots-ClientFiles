@@ -2,6 +2,7 @@ package com.localroots.clientfiles.api;
 
 import com.localroots.clientfiles.security.AuthService;
 import com.localroots.clientfiles.security.JwtService;
+import com.localroots.clientfiles.tenant.TenantService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -18,9 +19,11 @@ import java.util.UUID;
 public class AuthController {
 
     private final AuthService authService;
+    private final TenantService tenantService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, TenantService tenantService) {
         this.authService = authService;
+        this.tenantService = tenantService;
     }
 
     @PostMapping("/login")
@@ -31,15 +34,19 @@ public class AuthController {
                 result.accessToken(),
                 result.expiresAt(),
                 result.username(),
-                result.tenantId()
+                result.tenantId(),
+                result.tenantName()
         );
     }
 
     @GetMapping("/me")
     public CurrentUserResponse currentUser(@AuthenticationPrincipal Jwt jwt) {
+        UUID tenantId = UUID.fromString(jwt.getClaimAsString(JwtService.TENANT_ID_CLAIM));
+        String tenantName = tenantService.requireTenant(tenantId).getName();
         return new CurrentUserResponse(
                 jwt.getSubject(),
-                UUID.fromString(jwt.getClaimAsString(JwtService.TENANT_ID_CLAIM)),
+                tenantId,
+                tenantName,
                 jwt.getExpiresAt()
         );
     }

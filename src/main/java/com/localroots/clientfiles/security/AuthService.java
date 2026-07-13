@@ -1,6 +1,8 @@
 package com.localroots.clientfiles.security;
 
 import com.localroots.clientfiles.common.ApiException;
+import com.localroots.clientfiles.tenant.TenantEntity;
+import com.localroots.clientfiles.tenant.TenantService;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -15,17 +17,20 @@ public class AuthService {
     private final AuthenticationProperties properties;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final TenantService tenantService;
     private final String encodedPassword;
     private final UUID tenantId;
 
     public AuthService(
             AuthenticationProperties properties,
             PasswordEncoder passwordEncoder,
-            JwtService jwtService
+            JwtService jwtService,
+            TenantService tenantService
     ) {
         this.properties = properties;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.tenantService = tenantService;
         this.encodedPassword = passwordEncoder.encode(properties.getAdminPassword() == null ? "" : properties.getAdminPassword());
         this.tenantId = parseTenantId(properties.getTenantId());
     }
@@ -41,12 +46,14 @@ public class AuthService {
             );
         }
 
+        TenantEntity tenant = tenantService.requireTenant(tenantId);
         JwtService.IssuedToken token = jwtService.issue(properties.getAdminUsername().trim(), tenantId);
         return new LoginResult(
                 token.value(),
                 token.expiresAt(),
                 properties.getAdminUsername().trim(),
-                tenantId
+                tenantId,
+                tenant.getName()
         );
     }
 
@@ -61,12 +68,12 @@ public class AuthService {
 
     private UUID parseTenantId(String value) {
         if (value == null || value.isBlank()) {
-            return new UUID(0, 0);
+            throw new IllegalStateException("CLIENT_FILES_TENANT_ID must be configured with an existing Local Roots tenant UUID.");
         }
         try {
             return UUID.fromString(value.trim());
         } catch (IllegalArgumentException exception) {
-            return new UUID(0, 0);
+            throw new IllegalStateException("CLIENT_FILES_TENANT_ID must be a valid UUID.", exception);
         }
     }
 
@@ -74,7 +81,8 @@ public class AuthService {
             String accessToken,
             java.time.Instant expiresAt,
             String username,
-            UUID tenantId
+            UUID tenantId,
+            String tenantName
     ) {
     }
 }

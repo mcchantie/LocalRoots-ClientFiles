@@ -13,7 +13,7 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Entity
-@Table(name = "client_contacts")
+@Table(name = "contacts")
 public class ContactEntity {
 
     @Id
@@ -22,16 +22,16 @@ public class ContactEntity {
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
-    @Column(name = "first_name", length = 120)
+    @Column(name = "first_name", length = 255)
     private String firstName;
 
-    @Column(name = "last_name", length = 120)
+    @Column(name = "last_name", length = 255)
     private String lastName;
 
     @Column(name = "display_name", length = 255)
     private String displayName;
 
-    @Column(length = 50)
+    @Column(length = 255)
     private String phone;
 
     @Column(name = "normalized_phone", length = 30)
@@ -43,7 +43,7 @@ public class ContactEntity {
     @Column(name = "normalized_email", length = 320)
     private String normalizedEmail;
 
-    @Column(length = 2000)
+    @Column(name = "internal_notes", columnDefinition = "text")
     private String notes;
 
     @Column(name = "created_at", nullable = false)

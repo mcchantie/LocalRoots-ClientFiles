@@ -8,6 +8,7 @@ public record LoginResponse(
         String accessToken,
         Instant expiresAt,
         String username,
-        UUID tenantId
+        UUID tenantId,
+        String tenantName
 ) {
 }

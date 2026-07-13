@@ -92,7 +92,10 @@ public class ContactService {
 
         Page<ContactResponse> response = repository.findAll(
                         specification,
-                        PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.ASC, "displayName")
+                        PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.ASC, "firstName")
+                                .and(Sort.by(Sort.Direction.ASC, "lastName"))
+                                .and(Sort.by(Sort.Direction.ASC, "phone"))
+                                .and(Sort.by(Sort.Direction.ASC, "email"))
                                 .and(Sort.by(Sort.Direction.DESC, "createdAt")))
                 )
                 .map(ContactResponse::from);
@@ -126,10 +129,19 @@ public class ContactService {
             );
         }
 
+        String firstName = blankToNull(request.firstName());
+        String lastName = blankToNull(request.lastName());
+        String displayName = blankToNull(request.displayName());
+        if (displayName == null) {
+            String combinedName = ((firstName == null ? "" : firstName) + " "
+                    + (lastName == null ? "" : lastName)).trim();
+            displayName = combinedName.isBlank() ? null : combinedName;
+        }
+
         return new Values(
-                blankToNull(request.firstName()),
-                blankToNull(request.lastName()),
-                blankToNull(request.displayName()),
+                firstName,
+                lastName,
+                displayName,
                 phone,
                 normalizedPhone,
                 email,

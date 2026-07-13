@@ -8,7 +8,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
 
 import java.time.OffsetDateTime;
@@ -16,10 +15,7 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Entity
-@Table(
-        name = "client_attachments",
-        uniqueConstraints = @UniqueConstraint(name = "uk_client_attachments_bucket_key", columnNames = {"s3_bucket", "s3_key"})
-)
+@Table(name = "contact_attachments")
 public class AttachmentEntity {
 
     @Id
@@ -49,7 +45,7 @@ public class AttachmentEntity {
     @Column(nullable = false, length = 32)
     private AttachmentStatus status;
 
-    @Column(name = "original_file_name", nullable = false, length = 255)
+    @Column(name = "file_name", nullable = false, length = 255)
     private String originalFileName;
 
     @Column(name = "display_name", nullable = false, length = 255)
@@ -58,8 +54,8 @@ public class AttachmentEntity {
     @Column(name = "content_type", nullable = false, length = 255)
     private String contentType;
 
-    @Column(name = "declared_size_bytes", nullable = false)
-    private long declaredSizeBytes;
+    @Column(name = "file_size")
+    private Long declaredSizeBytes;
 
     @Column(name = "actual_size_bytes")
     private Long actualSizeBytes;
@@ -76,7 +72,7 @@ public class AttachmentEntity {
     @Column(name = "etag", length = 255)
     private String etag;
 
-    @Column(name = "source_system", nullable = false, length = 100)
+    @Column(name = "source_system", nullable = false, length = 255)
     private String sourceSystem;
 
     @Column(length = 2000)
@@ -205,7 +201,7 @@ public class AttachmentEntity {
     public String getOriginalFileName() { return originalFileName; }
     public String getDisplayName() { return displayName; }
     public String getContentType() { return contentType; }
-    public long getDeclaredSizeBytes() { return declaredSizeBytes; }
+    public long getDeclaredSizeBytes() { return declaredSizeBytes == null ? 0L : declaredSizeBytes; }
     public Long getActualSizeBytes() { return actualSizeBytes; }
     public String getChecksumSha256Base64() { return checksumSha256Base64; }
     public String getS3Bucket() { return s3Bucket; }
