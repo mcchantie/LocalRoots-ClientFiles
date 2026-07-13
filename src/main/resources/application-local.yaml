@@ -15,11 +15,11 @@ client-files:
     admin-password: ${CLIENT_FILES_ADMIN_PASSWORD:local-development-only}
     # Must be the UUID of an existing row in the shared Local Roots tenants table.
     tenant-id: ${CLIENT_FILES_TENANT_ID}
-    jwt-secret-base64: ${CLIENT_FILES_JWT_SECRET_BASE64:bG9jYWwtZGV2ZWxvcG1lbnQtand0LXNlY3JldC1vbmx5LTMyaA==}
+    jwt-secret-base64: ${CLIENT_FILES_JWT_SECRET_BASE64}
     jwt-issuer: client-files-api-local
     access-token-ttl: 8h
   cors:
-    allowed-origins: ${CLIENT_FILES_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+    allowed-origins: ${CLIENT_FILES_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,https://preview-sandbox--6a54113a94e0356c72ca2c4c.base44.app,https://preview--dynamic-client-file-flow.base44.app}
     allowed-origin-patterns: ${CLIENT_FILES_ALLOWED_ORIGIN_PATTERNS:}
   security:
     allow-tenant-header: false
