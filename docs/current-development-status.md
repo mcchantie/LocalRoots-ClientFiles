@@ -1,136 +1,220 @@
 # Client Files Current Development Status
 
-**Last updated:** July 11, 2026
+**Last updated:** July 13, 2026
 
 ## Current Phase
 
-The first Client Files backend structure is implemented. The immediate focus is validating local access to the development S3 bucket, inspecting the existing AWS development database, and designing database integration without automatic migrations.
+Client Files is in end-to-end integration testing.
+
+The Base44 dashboard is set up, the Spring Boot backend has been converted into a tenant-scoped API, and the AWS RDS development schema has been migrated and verified against the existing Local Roots CRM tables.
+
+The immediate task is to complete Base44-to-local-backend testing through an HTTPS tunnel, then deploy the backend and a separate production PostgreSQL database to Railway.
+
+## Current Architecture
+
+```text
+Base44 dashboard
+        |
+        | HTTPS JSON API with JWT bearer token
+        v
+Spring Boot backend
+  - Local machine in development
+  - Railway in production
+        |
+        +---- PostgreSQL metadata and relationships
+        |
+        +---- Presigned direct uploads to private Amazon S3
+```
+
+Base44 does not connect directly to PostgreSQL and does not receive permanent AWS credentials.
 
 ## Environment Placement
 
-| Environment | Application | PostgreSQL database | S3 |
-|---|---|---|---|
-| Development | Local machine | Existing AWS development database | Development Client Files bucket |
-| Production | Railway | Railway PostgreSQL | Production Client Files bucket |
+| Environment | Frontend | Backend | PostgreSQL | S3 |
+|---|---|---|---|---|
+| Development | Base44 preview | Local Spring Boot through HTTPS tunnel | Existing AWS RDS development database | Development Client Files bucket |
+| Production | Base44 production app | Railway | Railway PostgreSQL | Production Client Files bucket |
 
-Development and production must use separate AWS credentials, JDBC credentials, buckets, configuration, and data.
+Development and production use separate credentials, buckets, JWT secrets, origins, configuration, and data.
 
-The AWS development database is not currently planned to move to Railway. Railway production database setup and any required data transfer will be planned separately.
+## Base44 Dashboard Status
 
-## Backend Implemented
+The dashboard has been generated and revised to remain tenant-neutral.
 
-- AWS SDK for Java v2 S3 integration
-- Shared `S3Client` and `S3Presigner` Spring beans
-- AWS default credential provider chain
-- Tenant-scoped S3 object keys
-- Presigned direct `PutObject` uploads
-- Required signed upload headers
-- `HeadObject` upload-completion verification
-- Size, MIME type, ETag, and optional SHA-256 metadata handling
-- Short-lived presigned view and download URLs
-- Attachment categories and processing/status model
-- Tenant-scoped retrieval and filtering structure
-- Soft deletion and restoration behavior
-- Fail-closed production authorization boundary until login/JWT integration is connected
-- API error-handling structure
-- Railway-compatible production packaging
+Current dashboard scope includes:
 
-## Database Safety Status
+- Login and logout
+- Current-user and tenant-name lookup
+- Contact list and search
+- Nameless contact support
+- Contact detail and file views
+- Drag-and-drop uploads and progress
+- Attachment categories
+- Image previews
+- Open and download
+- All Files, Unassigned, and Deleted views
+- Assignment, reassignment, and unassignment
+- Soft deletion and restoration
+- Responsive desktop and mobile layouts
 
-No database migration tool or migration file is included.
+The shared product identity is **Local Roots Client Files**. Texas Top Dressing and lawn-specific wording must not be hard-coded.
 
-- No Flyway
-- No Liquibase
-- No automatic SQL migration
-- `spring.jpa.generate-ddl=false`
-- `spring.jpa.hibernate.ddl-auto=none`
+## Backend Status
 
-Application startup will not create, update, migrate, or validate tables. The existing AWS development database must be inspected before attachment or contact schema changes are designed.
+The API now includes:
 
-Future database changes will be explicitly reviewed before they run.
+- Stateless JWT login
+- Authenticated current-user lookup
+- Tenant-scoped authorization
+- Tenant name for frontend branding
+- Contact search, creation, reading, and updates
+- Phone-only and email-only contacts
+- Attachment listing and filtering
+- Unassigned attachments
+- Assignment, reassignment, and unassignment
+- Presigned S3 uploads
+- `HeadObject` completion verification
+- Short-lived view and download URLs
+- Soft deletion and restoration
+- Base44-compatible CORS
+- Railway deployment packaging
 
-## Contact Model Requirement
+Tenant identity comes from the signed token and backend configuration. Base44 must not supply an arbitrary tenant ID.
 
-Contacts must be allowed to exist without names.
+## Shared Database Integration
 
-- First name, last name, and display name must be nullable where applicable.
-- A nameless contact may be created with only a phone number or only an email address.
-- Attachments and estimate screenshots should link to the contact's database ID.
-- A name added later should update the same contact.
-- Phone numbers and email addresses should be normalized for matching and duplicate prevention.
-- Display fallback: name, then phone number, then email address, then `Unnamed contact`.
+Client Files uses:
 
-The existing contacts schema and backend validation must be checked for name requirements before the future production database work begins.
+- `tenants`
+- `contacts`
+- `contact_attachments`
 
-## S3 Configuration
+It does not use parallel `client_contacts` or `client_attachments` tables.
 
-Non-secret S3 settings may remain in `application.properties`:
+The development schema now supports nullable contact names, normalized phone and email values, usable-identifier enforcement, unassigned attachments, attachment categories and statuses, S3 metadata, verification fields, timestamps, soft deletion, parent relationships, indexes, checks, foreign keys, functions, and triggers.
 
-```properties
-storage.s3.region=us-east-2
-storage.s3.bucket=<development-bucket-name>
-storage.s3.max-file-size=100MB
-storage.s3.upload-url-ttl=15m
-storage.s3.download-url-ttl=15m
-storage.s3.allowed-content-types=image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,video/mp4,video/quicktime
+A post-migration schema-only `pg_dump` confirmed the expected changes and no duplicate Client Files tables.
+
+## Migration Policy
+
+The AWS RDS development database was updated using:
+
+1. Read-only preflight checks
+2. A safe-to-rerun integration migration
+3. Post-migration verification
+4. A fresh schema-only `pg_dump`
+
+Flyway remains disabled for the shared AWS development database. Local startup must not modify the schema automatically.
+
+Railway production will receive its own reviewed migration during deployment.
+
+## Contact Rules
+
+A contact may be created with:
+
+- Phone only
+- Email only
+- Name and phone
+- Name and email
+- Name, phone, and email
+
+At least one usable phone number or email address is required.
+
+Display fallback order:
+
+1. Name
+2. Phone number
+3. Email address
+4. `Unnamed contact`
+
+## Authentication and Secrets
+
+Base44 sends:
+
+```http
+Authorization: Bearer <access_token>
 ```
 
-AWS credentials must remain outside committed application properties:
-
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-
-No standalone AWS SDK installation is required. The AWS SDK for Java v2 is supplied through the Maven or Gradle dependency.
-
-## IntelliJ Credential Configuration
-
-The active Spring Boot or JUnit run configuration should use IntelliJ's parent-variable syntax:
+The signing secret is configured only in the backend:
 
 ```text
-AWS_ACCESS_KEY_ID=$LOCALROOTS_CLIENT_FILES_ACCESS_KEY_DEV$
-AWS_SECRET_ACCESS_KEY=$LOCALROOTS_CLIENT_FILES_SECRET_ACCESS_KEY_DEV$
+CLIENT_FILES_JWT_SECRET_BASE64
 ```
 
-`${VARIABLE_NAME}` is shell/property-placeholder syntax and was being passed literally by IntelliJ in this context.
+Generate a development value with:
 
-Spring Boot and JUnit run configurations are separate. Credentials added to one configuration are not automatically guaranteed to exist in another. IntelliJ must also inherit the parent `LOCALROOTS_CLIENT_FILES_*` variables.
+```bash
+openssl rand -base64 32
+```
 
-## Immediate Test
+Do not commit it, put it in Base44, or reuse it in production.
 
-Run an S3-only smoke test that performs:
+## Current Local Testing Issue
 
-1. `PutObject` to the development bucket
-2. `HeadObject` for the uploaded key
-3. Confirmation in the AWS S3 console
+Base44 is calling the local backend through a free ngrok URL. The current response contains:
 
-This test does not require the attachment database table. Successful Spring Boot startup alone does not prove that the AWS credentials work because the SDK may not contact S3 until an operation is invoked.
+```text
+Ngrok-Error-Code: ERR_NGROK_6024
+Content-Type: text/html
+```
 
-## Important Security Boundary
+Ngrok is returning its browser-warning page before the request reaches Spring Boot.
 
-Authentication is not yet integrated.
+The shared Base44 backend client must include:
 
-Any temporary tenant header or unverified contact/estimate relationship must remain development-only. Production must resolve tenant and uploader identity from authenticated claims and verify that related contacts and estimates belong to that tenant.
+```http
+ngrok-skip-browser-warning: true
+```
+
+for ngrok backend requests.
+
+Spring CORS must allow the exact Base44 preview origin and this custom header.
+
+Do not send `Authorization` or `ngrok-skip-browser-warning` to presigned S3 PUT URLs.
+
+## Required Development Configuration
+
+The local backend needs:
+
+- AWS development credentials through the default credential chain
+- Development S3 bucket and region
+- AWS RDS JDBC URL, user, and password
+- A real development `tenants.id` value
+- `CLIENT_FILES_JWT_SECRET_BASE64`
+- The exact Base44 preview origin in allowed origins
+- Current development login credentials
+
+The Base44 API base URL currently points to the HTTPS tunnel and will later be replaced by the Railway public URL.
 
 ## Immediate Next Steps
 
-1. Correct and verify IntelliJ credential substitution.
-2. Run the development-bucket S3 smoke test.
-3. Inspect the existing AWS development database schema.
-4. Identify current database and Java validation that requires contact names.
-5. Design nullable-name and attachment schema changes for explicit review.
-6. Connect the local app to the AWS development database only after the expected schema is understood.
-7. Plan Railway production PostgreSQL setup separately.
-8. Add authenticated tenant/contact/estimate authorization.
-9. Build the Client Files frontend upload screen and gallery.
+1. Add the ngrok warning-skip header to the centralized Base44 API client.
+2. Confirm Spring CORS permits the exact Base44 preview origin and custom header.
+3. Retest login and verify a JSON token is returned.
+4. Verify `/api/v1/auth/me` returns the tenant name.
+5. Test phone-only and email-only contacts.
+6. Test contact search and updates.
+7. Test attachment filters, including Unassigned and Deleted.
+8. Test the full presigned S3 upload and completion flow.
+9. Test open, download, assignment, reassignment, unassignment, delete, and restore.
+10. Run the complete backend test suite.
+11. Rebase, commit, and push the backend.
+12. Deploy the backend and production PostgreSQL to Railway.
+13. Apply the reviewed production schema migration.
+14. Replace the ngrok API URL in Base44 with the Railway URL.
+15. Configure final Base44 origins in Railway and production S3 CORS.
+16. Perform a production smoke test before operational use.
 
 ## Deferred Work
 
-- Automatic or reviewed database migration implementation
-- Multipart video uploads
+- Multiple users and roles per tenant
+- Tenant-configurable attachment categories
+- Tenant-configurable branding
+- Multipart and resumable video uploads
 - Abandoned-upload cleanup
 - Malware and file-signature inspection
 - Thumbnail generation
 - LandGlide crop processing
 - Physical S3 purge after retention
-- Estimate PDF generation and structured Estimater tables
-- Production login and admin/tenant dashboard integration
+- Estimate PDF generation and structured Estimater records
+- Production monitoring, audit reporting, and backup-restore drills

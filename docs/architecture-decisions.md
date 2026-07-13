@@ -451,7 +451,7 @@ Central bean configuration keeps region and credential behavior consistent and a
 
 ## ADR-022: Attachment Schema Integration Is Deferred
 
-**Status:** Amended July 11, 2026
+**Status:** Superseded July 13, 2026 by ADR-031
 
 The backend contains an attachment metadata entity and repository, but it will not create or modify database tables yet. The existing CRM tenant, contact, estimate, user, and `contact_attachments` schema must be inspected before choosing whether to extend an existing table or create a new one.
 
@@ -470,7 +470,7 @@ The current backend archive does not contain the existing CRM database schema. C
 
 ## ADR-023: Development Tenant Headers Are Explicitly Non-Production
 
-**Status:** Accepted
+**Status:** Superseded July 13, 2026 by ADR-030
 
 The local profile may resolve tenant identity from `X-Tenant-Id` so the upload API can be tested before login integration is complete.
 
@@ -544,7 +544,7 @@ This is sufficient for the first photo, document, and moderate video workflows w
 
 ## ADR-027: No Automatic Database Schema Management Yet
 
-**Status:** Accepted; supersedes the earlier Flyway decision
+**Status:** Amended July 13, 2026
 
 Client Files will not use Flyway, Liquibase, migration files, or Hibernate schema generation at this stage.
 
@@ -554,11 +554,11 @@ The database design has not been reconciled with the existing Local Roots CRM sc
 
 ### Consequences
 
-- Flyway dependencies and migration files are absent.
-- Hibernate uses `ddl-auto=none` and `generate-ddl=false`.
-- Application startup does not create, update, migrate, or validate tables.
-- The schema approach will be chosen later after the CRM database is inspected.
-- Database-backed endpoints will require the expected schema before they can be exercised.
+- The existing Local Roots schema has now been inspected and a reviewed integration migration was applied manually to the AWS development database.
+- Flyway remains disabled for the AWS development database so local startup does not alter the shared schema.
+- Hibernate continues to use `ddl-auto=none` and `generate-ddl=false`.
+- Future development and production schema changes must be reviewed explicitly before execution.
+- Railway production database migration remains a separate controlled deployment step.
 
 ---
 
@@ -590,3 +590,165 @@ The interface should identify a contact using this order:
 3. Email address
 4. `Unnamed contact`
 
+---
+
+## ADR-029: Base44 Owns the Dashboard; Spring Boot Is API-Only
+
+**Status:** Accepted July 13, 2026
+
+The Client Files dashboard will be built and hosted in Base44. The Spring Boot application will run as an API-only backend on Railway.
+
+### Deployment Boundary
+
+- Base44 owns login screens, contacts, file galleries, filters, upload controls, and responsive UI behavior.
+- Railway hosts the Spring Boot JSON API.
+- Railway PostgreSQL will hold production relational data.
+- Amazon S3 will hold private file objects.
+- Spring Boot will not bundle or serve the production dashboard.
+
+### Rationale
+
+Separating the frontend allows rapid dashboard development while keeping authorization, tenant isolation, database access, S3 signing, and business rules in the backend.
+
+---
+
+## ADR-030: Stateless JWT Authentication Determines Tenant Context
+
+**Status:** Accepted July 13, 2026
+
+Base44 authenticates through the backend. The backend issues a signed JWT, and authenticated requests use:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+Tenant identity is derived from the signed token and backend-controlled tenant configuration. The browser must not choose a tenant by sending an arbitrary tenant ID.
+
+### Consequences
+
+- The temporary `X-Tenant-Id` development approach is superseded.
+- Contact and attachment operations are tenant-scoped on the server.
+- Base44 clears the token and returns to login after `401`.
+- `403` is treated as a permission failure.
+- JWT secrets exist only in backend environment configuration.
+- Development and production use different signing secrets.
+
+---
+
+## ADR-031: Client Files Reuses Shared Local Roots Tables
+
+**Status:** Accepted July 13, 2026
+
+Client Files uses the existing shared tables:
+
+- `tenants`
+- `contacts`
+- `contact_attachments`
+
+It will not create parallel `client_contacts` or `client_attachments` tables.
+
+### Contact Integration
+
+- First and last names are nullable.
+- A contact must have a usable phone number or email address.
+- Phone and email are normalized for matching.
+- A database trigger maintains normalized identifiers for every application using the table.
+- Attachments continue to reference contacts by database ID.
+
+### Attachment Integration
+
+- `contact_attachments.contact_id` may be null for unassigned files.
+- The table stores category, file kind, upload status, names, S3 metadata, verification metadata, timestamps, soft-deletion state, and parent relationships.
+- Existing CRM source-system constraints remain intact.
+- Base44-created files use an allowed shared source-system value.
+
+### Rationale
+
+Contacts and attachments are platform records. Reusing shared tables prevents duplicate clients and keeps Client Files compatible with the rest of Local Roots.
+
+---
+
+## ADR-032: Development RDS Changes Use Reviewed Safe-to-Rerun SQL
+
+**Status:** Accepted July 13, 2026
+
+The locally running backend continues to use the AWS RDS development database. Schema changes are applied through reviewed SQL rather than automatic local startup migration.
+
+### Required Process
+
+1. Confirm the active database and user.
+2. Run read-only preflight checks.
+3. Run the reviewed safe-to-rerun migration.
+4. Run post-migration verification.
+5. Export a fresh schema-only `pg_dump` for comparison.
+
+### Tooling Note
+
+PostgreSQL function bodies enclosed in dollar quotes must be executed as complete statements. SQL editors that split at internal semicolons can produce an unterminated dollar-quoted string error; executing the full script or using `psql` avoids it.
+
+---
+
+## ADR-033: The Base44 Dashboard Is Tenant-Neutral
+
+**Status:** Accepted July 13, 2026
+
+The shared dashboard is branded **Local Roots Client Files** and must not be hard-coded to Texas Top Dressing, lawn leveling, or any single service industry.
+
+### Requirements
+
+- Tenant identity may be displayed from `/api/v1/auth/me`.
+- Tenant IDs and company names are not hard-coded.
+- The browser cannot select or change its tenant.
+- Generic terms such as Contacts, Files, Photos, Videos, Documents, Estimates, Unassigned, and Deleted are used.
+- Backend category enum values remain unchanged while Base44 may show tenant-neutral labels.
+- Branding and category display mapping remain centralized for future tenant configuration.
+
+---
+
+## ADR-034: Base44 CORS and Local Tunnel Rules
+
+**Status:** Accepted July 13, 2026
+
+The backend permits configured Base44 origins and the headers needed by its API client.
+
+During local testing through a free ngrok tunnel, Base44 backend requests include:
+
+```http
+ngrok-skip-browser-warning: true
+```
+
+The backend development CORS configuration must allow this header.
+
+### Consequences
+
+- The exact Base44 preview or production origin must be configured.
+- `Authorization` and `ngrok-skip-browser-warning` are sent only to the backend.
+- Neither header is sent to presigned S3 URLs.
+- Direct S3 uploads send only headers required by the presigned upload response.
+
+---
+
+## ADR-035: JWT Secret Handling
+
+**Status:** Accepted July 13, 2026
+
+The backend signing key is supplied through:
+
+```text
+CLIENT_FILES_JWT_SECRET_BASE64
+```
+
+Generate a development value with:
+
+```bash
+openssl rand -base64 32
+```
+
+The value must decode to at least 32 bytes.
+
+### Security Rules
+
+- The secret is not stored in Base44.
+- The secret is not committed to Git.
+- Development and production use different values.
+- Rotating the secret invalidates existing tokens.
