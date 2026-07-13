@@ -22,7 +22,8 @@ public class WebConfig {
                 "Content-Type",
                 "Accept",
                 "X-Correlation-Id",
-                "X-Tenant-Id"
+                "X-Tenant-Id",
+                "ngrok-skip-browser-warning"
         ));
         configuration.setExposedHeaders(List.of("Location", "X-Correlation-Id"));
         configuration.setAllowCredentials(false);

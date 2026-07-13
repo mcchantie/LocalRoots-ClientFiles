@@ -7,7 +7,7 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "client-files.auth")
 public class AuthenticationProperties {
 
-    private String adminUsername = "admin";
+    private String adminUsername;
     private String adminPassword;
     private String tenantId;
     private String jwtSecretBase64;
