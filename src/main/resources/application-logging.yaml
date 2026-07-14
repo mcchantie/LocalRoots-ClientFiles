@@ -1,12 +1,23 @@
 logging:
   level:
-    root: INFO
-    com.localroots.clientfiles: DEBUG
-    org.springframework.web: INFO
-    org.hibernate.SQL: WARN
-    org.hibernate.orm.jdbc.bind: WARN
+    root: ${ROOT_LOG_LEVEL:INFO}
+    com.localroots.clientfiles: ${CLIENT_FILES_LOG_LEVEL:DEBUG}
+    org.springframework.web: ${SPRING_WEB_LOG_LEVEL:INFO}
+    org.springframework.web.cors: ${SPRING_CORS_LOG_LEVEL:INFO}
+    org.springframework.security: ${SPRING_SECURITY_LOG_LEVEL:INFO}
+    com.zaxxer.hikari: ${HIKARI_LOG_LEVEL:INFO}
+    org.hibernate.SQL: ${HIBERNATE_SQL_LOG_LEVEL:WARN}
+    # Keep parameter binding off by default because it can expose client PII.
+    org.hibernate.orm.jdbc.bind: ${HIBERNATE_BIND_LOG_LEVEL:WARN}
+    software.amazon.awssdk: ${AWS_SDK_LOG_LEVEL:WARN}
   file:
-    name: logs/localroots-clientfiles.log
+    name: ${CLIENT_FILES_LOG_FILE:logs/localroots-clientfiles.log}
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{correlationId:-na}] [%X{tenant:-na}] %logger{36} - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{correlationId:-na}] [%X{tenant:-na}] %logger{36} - %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{correlationId:-na}] [%X{tenant:-na}] [%X{user:-na}] %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{correlationId:-na}] [%X{tenant:-na}] [%X{user:-na}] %logger{36} - %msg%n"
+  logback:
+    rollingpolicy:
+      max-file-size: ${CLIENT_FILES_LOG_MAX_FILE_SIZE:10MB}
+      max-history: ${CLIENT_FILES_LOG_MAX_HISTORY:14}
+      total-size-cap: ${CLIENT_FILES_LOG_TOTAL_SIZE_CAP:200MB}
+      clean-history-on-start: false

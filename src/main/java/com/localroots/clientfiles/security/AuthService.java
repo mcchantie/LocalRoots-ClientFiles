@@ -3,6 +3,8 @@ package com.localroots.clientfiles.security;
 import com.localroots.clientfiles.common.ApiException;
 import com.localroots.clientfiles.tenant.TenantEntity;
 import com.localroots.clientfiles.tenant.TenantService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -13,6 +15,8 @@ import java.util.UUID;
 
 @Service
 public class AuthService {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
 
     private final AuthenticationProperties properties;
     private final PasswordEncoder passwordEncoder;
@@ -36,9 +40,12 @@ public class AuthService {
     }
 
     public LoginResult login(String username, String password) {
+        String attemptedUsername = username == null ? "-" : username.trim();
+        log.info("Authentication attempt username={}", attemptedUsername);
         boolean usernameValid = usernameMatches(username);
         boolean passwordValid = passwordEncoder.matches(password, encodedPassword);
         if (!usernameValid || !passwordValid) {
+            log.warn("Authentication failed username={} usernameMatched={}", attemptedUsername, usernameValid);
             throw new ApiException(
                     HttpStatus.UNAUTHORIZED,
                     "Invalid credentials",
@@ -48,6 +55,12 @@ public class AuthService {
 
         TenantEntity tenant = tenantService.requireTenant(tenantId);
         JwtService.IssuedToken token = jwtService.issue(properties.getAdminUsername().trim(), tenantId);
+        log.info(
+                "Authentication succeeded username={} tenantId={} tokenExpiresAt={}",
+                properties.getAdminUsername().trim(),
+                tenantId,
+                token.expiresAt()
+        );
         return new LoginResult(
                 token.value(),
                 token.expiresAt(),

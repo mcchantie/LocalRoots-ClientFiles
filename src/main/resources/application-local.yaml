@@ -12,7 +12,7 @@ storage:
 client-files:
   auth:
     admin-username: ${CLIENT_FILES_ADMIN_USERNAME:admin}
-    admin-password: ${CLIENT_FILES_ADMIN_PASSWORD:local-development-only}
+    admin-password: ${CLIENT_FILES_ADMIN_PASSWORD:local}
     # Must be the UUID of an existing row in the shared Local Roots tenants table.
     tenant-id: ${CLIENT_FILES_TENANT_ID}
     jwt-secret-base64: ${CLIENT_FILES_JWT_SECRET_BASE64}

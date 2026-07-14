@@ -1,0 +1,16 @@
+spring:
+  config:
+    activate:
+      on-profile: debug
+
+logging:
+  level:
+    com.localroots.clientfiles: TRACE
+    org.springframework.web.cors: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping: TRACE
+    com.zaxxer.hikari: DEBUG
+    # SQL values and bind parameters remain disabled to avoid logging client PII.
+    org.hibernate.SQL: WARN
+    org.hibernate.orm.jdbc.bind: WARN
+    software.amazon.awssdk: WARN

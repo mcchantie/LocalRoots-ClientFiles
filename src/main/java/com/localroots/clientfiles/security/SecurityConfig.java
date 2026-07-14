@@ -1,6 +1,8 @@
 package com.localroots.clientfiles.security;
 
 import com.localroots.clientfiles.config.CorsProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -28,6 +30,8 @@ import java.util.UUID;
 
 @Configuration
 public class SecurityConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -87,6 +91,12 @@ public class SecurityConfig {
                 .oauth2ResourceServer(oauth -> oauth
                         .jwt(Customizer.withDefaults())
                         .authenticationEntryPoint((request, response, exception) -> {
+                            log.warn(
+                                    "Authentication required method={} path={} reason={}",
+                                    request.getMethod(),
+                                    request.getRequestURI(),
+                                    exception.getClass().getSimpleName()
+                            );
                             response.setStatus(401);
                             response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
                             response.getWriter().write("{\"title\":\"Authentication required\",\"status\":401,\"detail\":\"Send a valid Bearer token.\"}");
@@ -94,6 +104,12 @@ public class SecurityConfig {
                 )
                 .exceptionHandling(exceptions -> exceptions
                         .accessDeniedHandler((request, response, exception) -> {
+                            log.warn(
+                                    "Access denied method={} path={} reason={}",
+                                    request.getMethod(),
+                                    request.getRequestURI(),
+                                    exception.getClass().getSimpleName()
+                            );
                             response.setStatus(403);
                             response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
                             response.getWriter().write("{\"title\":\"Access denied\",\"status\":403,\"detail\":\"You do not have permission to perform this action.\"}");
@@ -148,6 +164,7 @@ public class SecurityConfig {
             if (cors.getAllowedOrigins().isEmpty() && cors.getAllowedOriginPatterns().isEmpty()) {
                 throw new IllegalStateException("Configure at least one Base44 origin using CLIENT_FILES_ALLOWED_ORIGINS or CLIENT_FILES_ALLOWED_ORIGIN_PATTERNS.");
             }
+            log.info("Production security configuration validation completed successfully");
         };
     }
 

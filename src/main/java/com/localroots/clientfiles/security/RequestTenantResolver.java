@@ -1,6 +1,7 @@
 package com.localroots.clientfiles.security;
 
 import com.localroots.clientfiles.common.ApiException;
+import com.localroots.clientfiles.common.LoggingContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -33,7 +34,10 @@ public class RequestTenantResolver {
                 );
             }
             try {
-                return UUID.fromString(claim);
+                UUID tenantId = UUID.fromString(claim);
+                LoggingContext.putTenant(tenantId.toString());
+                LoggingContext.putUser(jwt.getSubject());
+                return tenantId;
             } catch (IllegalArgumentException exception) {
                 throw new ApiException(
                         HttpStatus.UNAUTHORIZED,
@@ -65,7 +69,10 @@ public class RequestTenantResolver {
         }
 
         try {
-            return UUID.fromString(value.trim());
+            UUID tenantId = UUID.fromString(value.trim());
+            LoggingContext.putTenant(tenantId.toString());
+            LoggingContext.putUser("development-tenant-header");
+            return tenantId;
         } catch (IllegalArgumentException exception) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid tenant header", "X-Tenant-Id must be a UUID.");
         }
