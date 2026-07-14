@@ -4,11 +4,21 @@
 
 ## Current Phase
 
-Client Files is in end-to-end integration testing.
+Client Files is in late development integration testing and production-deployment preparation.
 
-The Base44 dashboard is set up, the Spring Boot backend has been converted into a tenant-scoped API, and the AWS RDS development schema has been migrated and verified against the existing Local Roots CRM tables.
+The end-to-end development upload path is working:
 
-The immediate task is to complete Base44-to-local-backend testing through an HTTPS tunnel, then deploy the backend and a separate production PostgreSQL database to Railway.
+```text
+Base44
+  -> Spring Boot upload initialization
+  -> browser PUT to private development S3 bucket
+  -> Spring Boot completion verification
+  -> READY attachment in PostgreSQL
+```
+
+Uploaded files can be opened through short-lived S3 URLs, and image thumbnails can be displayed in the dashboard.
+
+The next phase is to consolidate and verify the latest backend changes, finish the remaining Base44 behaviors, run the full test suite, and initialize the Railway production database.
 
 ## Current Architecture
 
@@ -23,10 +33,13 @@ Spring Boot backend
         |
         +---- PostgreSQL metadata and relationships
         |
-        +---- Presigned direct uploads to private Amazon S3
+        +---- Presigned upload, view, and download URLs
+                     |
+                     v
+               Private Amazon S3
 ```
 
-Base44 does not connect directly to PostgreSQL and does not receive permanent AWS credentials.
+Base44 never receives permanent AWS credentials and does not connect directly to PostgreSQL.
 
 ## Environment Placement
 
@@ -35,185 +48,203 @@ Base44 does not connect directly to PostgreSQL and does not receive permanent AW
 | Development | Base44 preview | Local Spring Boot through HTTPS tunnel | Existing AWS RDS development database | Development Client Files bucket |
 | Production | Base44 production app | Railway | Railway PostgreSQL | Production Client Files bucket |
 
-Development and production use separate credentials, buckets, JWT secrets, origins, configuration, and data.
+Development and production use separate databases, buckets, AWS credentials, JWT secrets, origins, tenant identifiers, and configuration.
 
-## Base44 Dashboard Status
+## Confirmed Working
 
-The dashboard has been generated and revised to remain tenant-neutral.
+- JWT login through the local HTTPS tunnel
+- Authenticated current-user and tenant-name lookup
+- Tenant-scoped contacts
+- Phone-only and email-only contact schema rules
+- Upload initialization with the corrected JSON contract
+- Browser-to-S3 presigned `PUT`
+- S3 CORS for the Base44 development origin
+- Backend `HeadObject` completion verification
+- READY attachment creation
+- Temporary Open/view URLs
+- Actual image thumbnail display
+- Contact detail pages
+- All Files and Unassigned attachment retrieval when frontend-only `ALL` filter values are omitted
+- Shared `tenants`, `contacts`, and `contact_attachments` schema
+- Soft-delete and restore backend operations
 
-Current dashboard scope includes:
+## Backend Updates Prepared During This Session
 
-- Login and logout
-- Current-user and tenant-name lookup
-- Contact list and search
-- Nameless contact support
-- Contact detail and file views
-- Drag-and-drop uploads and progress
-- Attachment categories
-- Image previews
-- Open and download
-- All Files, Unassigned, and Deleted views
-- Assignment, reassignment, and unassignment
-- Soft deletion and restoration
-- Responsive desktop and mobile layouts
+The backend updates produced during testing include:
 
-The shared product identity is **Local Roots Client Files**. Texas Top Dressing and lawn-specific wording must not be hard-coded.
+- `GET /api/v1/contacts/{contactId}/attachments`
+- Safe tenant validation for contact-scoped file lists
+- `PATCH /api/v1/attachments/{attachmentId}` for assign, reassign, and unassign
+- Proper `405 Method Not Allowed` handling
+- Safe download filename generation and `Content-Disposition`
+- `deletedOnly=true` list filtering
+- Correlation-aware request and operation logging
+- S3, database, validation, assignment, deletion, and restoration diagnostics
+- Optional detailed debug logging profile
 
-## Backend Status
+These changes should be consolidated into the active backend branch and verified together before deployment.
 
-The API now includes:
+## Upload Contract
 
-- Stateless JWT login
-- Authenticated current-user lookup
-- Tenant-scoped authorization
-- Tenant name for frontend branding
-- Contact search, creation, reading, and updates
-- Phone-only and email-only contacts
-- Attachment listing and filtering
-- Unassigned attachments
-- Assignment, reassignment, and unassignment
-- Presigned S3 uploads
-- `HeadObject` completion verification
-- Short-lived view and download URLs
-- Soft deletion and restoration
-- Base44-compatible CORS
-- Railway deployment packaging
+The initialization request uses:
 
-Tenant identity comes from the signed token and backend configuration. Base44 must not supply an arbitrary tenant ID.
+- `originalFileName`
+- `contentType`
+- Positive numeric `sizeBytes`
+- Backend category enum
+- Selected contact UUID or `null`
 
-## Shared Database Integration
+The frontend then uploads the original JavaScript `File` to the presigned S3 URL and calls the completion endpoint.
 
-Client Files uses:
+Backend headers such as `Authorization` and `ngrok-skip-browser-warning` must never be sent to S3.
 
-- `tenants`
-- `contacts`
-- `contact_attachments`
+## Attachment Category Labels
 
-It does not use parallel `client_contacts` or `client_attachments` tables.
+| Backend value | Base44 label |
+|---|---|
+| `ESTIMATES` | Estimates |
+| `LANDGLIDE` | LandGlide Photos |
+| `PROPERTY_PHOTOS` | Photos |
+| `VIDEOS` | Videos |
+| `DOCUMENTS` | Documents |
+| `OTHER` | Other |
 
-The development schema now supports nullable contact names, normalized phone and email values, usable-identifier enforcement, unassigned attachments, attachment categories and statuses, S3 metadata, verification fields, timestamps, soft deletion, parent relationships, indexes, checks, foreign keys, functions, and triggers.
+The backend enums remain unchanged.
 
-A post-migration schema-only `pg_dump` confirmed the expected changes and no duplicate Client Files tables.
+## Download Behavior
 
-## Migration Policy
+The backend should control the download filename.
 
-The AWS RDS development database was updated using:
-
-1. Read-only preflight checks
-2. A safe-to-rerun integration migration
-3. Post-migration verification
-4. A fresh schema-only `pg_dump`
-
-Flyway remains disabled for the shared AWS development database. Local startup must not modify the schema automatically.
-
-Railway production will receive its own reviewed migration during deployment.
-
-## Contact Rules
-
-A contact may be created with:
-
-- Phone only
-- Email only
-- Name and phone
-- Name and email
-- Name, phone, and email
-
-At least one usable phone number or email address is required.
-
-Display fallback order:
-
-1. Name
-2. Phone number
-3. Email address
-4. `Unnamed contact`
-
-## Authentication and Secrets
-
-Base44 sends:
-
-```http
-Authorization: Bearer <access_token>
-```
-
-The signing secret is configured only in the backend:
+Example:
 
 ```text
-CLIENT_FILES_JWT_SECRET_BASE64
+Display name: bob's lawn
+Original filename: local_roots_logo_facebook_cover.png
+Download name: bobs_lawn.png
 ```
 
-Generate a development value with:
+Open uses a temporary URL with `download=false`. Download uses `download=true`.
 
-```bash
-openssl rand -base64 32
-```
+## Contact Assignment Rules
 
-Do not commit it, put it in Base44, or reuse it in production.
+- Empty client search with no selected contact permits an unassigned upload.
+- Typed text does not equal a selected contact.
+- Unmatched non-empty text blocks upload and prompts the user to select or create a client.
+- A new contact requires a phone number or email address.
+- Name fields remain optional.
+- Assignment and unassignment use PATCH with a contact UUID or `null`.
 
-## Current Local Testing Issue
+## Deleted Files Semantics
 
-Base44 is calling the local backend through a free ngrok URL. The current response contains:
+- No deletion parameter: active files only
+- `includeDeleted=true`: active and deleted files
+- `deletedOnly=true`: deleted files only
 
-```text
-Ngrok-Error-Code: ERR_NGROK_6024
-Content-Type: text/html
-```
-
-Ngrok is returning its browser-warning page before the request reaches Spring Boot.
-
-The shared Base44 backend client must include:
+The Deleted Files page must use:
 
 ```http
-ngrok-skip-browser-warning: true
+GET /api/v1/attachments?deletedOnly=true&page=0&size=25
 ```
 
-for ngrok backend requests.
+Deleting remains recoverable and does not physically remove the S3 object.
 
-Spring CORS must allow the exact Base44 preview origin and this custom header.
+## Base44 UI Status
 
-Do not send `Authorization` or `ngrok-skip-browser-warning` to presigned S3 PUT URLs.
+Implemented or visible during testing:
 
-## Required Development Configuration
+- Tenant business name in the application chrome
+- Contacts and contact search
+- Contact detail pages
+- All Files, Unassigned, and Deleted navigation
+- Attachment cards
+- Image thumbnails
+- Open and Download controls
+- Assignment menus
+- Upload dialog
+- Responsive/mobile navigation structure
 
-The local backend needs:
+Still requiring final verification or completion:
 
-- AWS development credentials through the default credential chain
-- Development S3 bucket and region
-- AWS RDS JDBC URL, user, and password
-- A real development `tenants.id` value
-- `CLIENT_FILES_JWT_SECRET_BASE64`
-- The exact Base44 preview origin in allowed origins
-- Current development login credentials
+- Contacts as the default root and post-login view
+- Create-new-client fields in the upload dialog
+- Client-not-found validation
+- Delete action in every active attachment dropdown
+- Restore-only behavior in Deleted Files
+- Deleted Files using `deletedOnly=true`
+- Correct contact labels on file cards
+- Mobile drawer styling after the theme-color change
+- Safe download filename after the latest backend restart
 
-The Base44 API base URL currently points to the HTTPS tunnel and will later be replaced by the Railway public URL.
+## Logging and Debugging
+
+The updated backend logging design includes:
+
+- Correlation IDs
+- Tenant and authenticated-user context
+- Request method, path, status, and duration
+- Upload, S3 verification, completion, assignment, deletion, and restore events
+- Structured error categories
+- Rotating local logs
+- Optional `local,debug` profile
+
+Logs must not include JWTs, AWS secrets, complete presigned URLs, passwords, or raw contact identifiers.
+
+A separate warning was observed from Hikari validating closed PostgreSQL connections. This did not cause the unsupported PATCH failure, but connection-pool lifetime settings should be reviewed if the warning continues.
+
+## Railway Database Preparation
+
+A Railway PostgreSQL setup bundle has been prepared with:
+
+- Preflight checks
+- Schema creation
+- Production tenant seed
+- Post-setup verification
+- Transactional smoke test and cleanup
+
+Use one creation path:
+
+- Production Flyway, followed by tenant seed and verification; or
+- Manual schema script with Flyway disabled
+
+Do not run both schema-creation paths.
+
+The production tenant uses one stable UUID, also supplied as:
+
+```text
+CLIENT_FILES_TENANT_ID
+```
+
+A new schema-only `pg_dump` is needed only if the AWS development schema changed after the last verified dump. A full development data dump should not be copied into Railway by default.
 
 ## Immediate Next Steps
 
-1. Add the ngrok warning-skip header to the centralized Base44 API client.
-2. Confirm Spring CORS permits the exact Base44 preview origin and custom header.
-3. Retest login and verify a JSON token is returned.
-4. Verify `/api/v1/auth/me` returns the tenant name.
-5. Test phone-only and email-only contacts.
-6. Test contact search and updates.
-7. Test attachment filters, including Unassigned and Deleted.
-8. Test the full presigned S3 upload and completion flow.
-9. Test open, download, assignment, reassignment, unassignment, delete, and restore.
-10. Run the complete backend test suite.
-11. Rebase, commit, and push the backend.
-12. Deploy the backend and production PostgreSQL to Railway.
-13. Apply the reviewed production schema migration.
-14. Replace the ngrok API URL in Base44 with the Railway URL.
-15. Configure final Base44 origins in Railway and production S3 CORS.
-16. Perform a production smoke test before operational use.
+1. Consolidate all backend fixes into the active repository branch.
+2. Restart the backend and run the full Maven test suite.
+3. Retest assignment, reassignment, and unassignment.
+4. Switch Base44 Deleted Files to `deletedOnly=true`.
+5. Verify Delete and Restore across all attachment views.
+6. Verify sanitized download filenames.
+7. Complete and test upload-time new-client creation.
+8. Verify Contacts as the default view and tenant name placement.
+9. Retest image preview caching and full-size viewing.
+10. Fix and retest the mobile navigation drawer theme regression.
+11. Review stale `PENDING_UPLOAD` rows and abandoned development objects.
+12. Review Hikari connection lifetime settings if warnings continue.
+13. Choose the Railway schema-creation path.
+14. Initialize Railway PostgreSQL and seed the stable production tenant.
+15. Deploy the backend to Railway.
+16. Replace the ngrok API URL in Base44 with the Railway URL.
+17. Configure final production Base44 and S3 CORS origins.
+18. Perform a production smoke test before operational use.
 
 ## Deferred Work
 
 - Multiple users and roles per tenant
-- Tenant-configurable attachment categories
-- Tenant-configurable branding
+- Tenant-configurable categories and branding
 - Multipart and resumable video uploads
-- Abandoned-upload cleanup
+- Automated abandoned-upload cleanup
 - Malware and file-signature inspection
-- Thumbnail generation
+- Thumbnail generation service
 - LandGlide crop processing
 - Physical S3 purge after retention
 - Estimate PDF generation and structured Estimater records

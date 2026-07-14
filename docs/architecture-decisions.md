@@ -752,3 +752,279 @@ The value must decode to at least 32 bytes.
 - The secret is not committed to Git.
 - Development and production use different values.
 - Rotating the secret invalidates existing tokens.
+
+---
+
+## ADR-036: Direct-to-S3 Uploads Remain a Three-Step Workflow
+
+**Status:** Accepted July 13, 2026
+
+Client Files will keep the direct-to-S3 upload architecture.
+
+One frontend upload function will orchestrate these three operations:
+
+1. `POST /api/v1/attachments/uploads` to create a pending attachment and receive a presigned upload URL.
+2. `PUT` the original browser `File` directly to the presigned S3 URL.
+3. `POST /api/v1/attachments/{attachmentId}/complete` so the backend can verify the S3 object and mark the attachment ready.
+
+The two backend endpoints will not be collapsed into a multipart upload endpoint at this stage.
+
+### Required Frontend Contract
+
+The upload-initialization request must include the backend field names and values, including:
+
+- `originalFileName`
+- `contentType`
+- Positive numeric `sizeBytes`
+- Backend category enum
+- Selected contact UUID or `null`
+
+The frontend must retain the original JavaScript `File` object until the S3 `PUT` completes.
+
+### Security Boundary
+
+- Backend API requests use the JWT and, during local tunnel testing, the ngrok warning-skip header.
+- Presigned S3 requests use only the headers returned by the backend.
+- JWT, ngrok, and JSON API headers are never sent to S3.
+- The completion endpoint remains responsible for `HeadObject` verification.
+
+---
+
+## ADR-037: Browser Uploads Require Separate S3 CORS Configuration
+
+**Status:** Accepted July 13, 2026
+
+Spring API CORS and S3 bucket CORS are separate controls.
+
+The Client Files S3 bucket must allow the exact Base44 browser origin to perform the browser operations required by the application.
+
+### Development Baseline
+
+- Allowed origins: exact Base44 preview origin or other explicitly approved frontend origins
+- Allowed methods: `PUT`, `GET`, and `HEAD`
+- Allowed headers: the headers required by the presigned operation; `*` is acceptable during development
+- `OPTIONS` is not added as an S3 allowed method because S3 handles preflight automatically
+- Exposing `ETag` is optional unless frontend JavaScript needs to read it
+
+CORS does not make the bucket public. IAM, bucket policy, object privacy, and the presigned signature continue to authorize access.
+
+---
+
+## ADR-038: Download Filenames Use Display Names with Safe Extensions
+
+**Status:** Accepted July 13, 2026
+
+The backend will generate the download filename and set it in the presigned S3 response `Content-Disposition`.
+
+### Filename Rules
+
+- Use `display_name` as the base when present.
+- Otherwise use the original filename base.
+- Preserve the extension from `original_file_name`.
+- Infer an extension from the content type only when the original name has no extension.
+- Remove apostrophes.
+- Convert whitespace and unsafe filename characters to underscores.
+- Collapse repeated underscores.
+- Avoid duplicating the extension.
+- Use a safe fallback such as `file`.
+
+Example:
+
+```text
+Display name: bob's lawn
+Original filename: local_roots_logo_facebook_cover.png
+Download filename: bobs_lawn.png
+```
+
+The Open action continues to request a view URL with `download=false`. The Download action requests a URL with `download=true`.
+
+---
+
+## ADR-039: Attachment Category Labels Are Centralized
+
+**Status:** Accepted July 13, 2026
+
+Backend category enum values remain unchanged:
+
+- `ESTIMATES`
+- `LANDGLIDE`
+- `PROPERTY_PHOTOS`
+- `VIDEOS`
+- `DOCUMENTS`
+- `OTHER`
+
+The Base44 dashboard displays them as:
+
+| Backend value | Display label |
+|---|---|
+| `ESTIMATES` | Estimates |
+| `LANDGLIDE` | LandGlide Photos |
+| `PROPERTY_PHOTOS` | Photos |
+| `VIDEOS` | Videos |
+| `DOCUMENTS` | Documents |
+| `OTHER` | Other |
+
+The label **Property Maps** is removed. Display labels remain a frontend concern and must not rename backend enum values.
+
+---
+
+## ADR-040: Contacts Is the Default Dashboard View
+
+**Status:** Accepted July 13, 2026
+
+After login and when the application opens at its root route, the dashboard defaults to **Contacts** rather than **All Files**.
+
+The tenant business name returned by `/api/v1/auth/me` is displayed in the sidebar beneath **Local Roots Client Files**.
+
+### Requirements
+
+- The tenant name is never hard-coded.
+- Explicit deep links to files, contacts, Unassigned, or Deleted are preserved.
+- The same tenant name should not be redundantly repeated in multiple prominent page headings.
+
+---
+
+## ADR-041: Upload-Time Contact Selection Is Explicit
+
+**Status:** Accepted July 13, 2026
+
+Typing text into the upload dialog's client search field does not assign a contact. A contact is assigned only when the user selects an actual backend search result.
+
+### Behavior
+
+- Empty search text and no selected contact means the upload may remain unassigned.
+- Non-empty search text without a selected result blocks upload.
+- The UI displays: `Client not found. Select an existing client or create a new client.`
+- The new-client fields are then shown.
+- A newly created client must contain a usable phone number or email address; a name alone is insufficient.
+- The new contact is created before upload initialization.
+- The returned contact UUID is used for every applicable file in that upload batch.
+- Typed client text is never sent as `contactId`.
+
+---
+
+## ADR-042: Base44-Compatible Attachment Routes Are Part of the API Contract
+
+**Status:** Accepted July 13, 2026
+
+The backend supports the dashboard routes needed for attachment navigation and assignment.
+
+### Contact Files
+
+```http
+GET /api/v1/contacts/{contactId}/attachments
+```
+
+This route verifies that the contact belongs to the authenticated tenant before listing files.
+
+### Assignment and Unassignment
+
+```http
+PATCH /api/v1/attachments/{attachmentId}
+Content-Type: application/json
+```
+
+Assign or reassign:
+
+```json
+{
+  "contactId": "contact-uuid"
+}
+```
+
+Return to Unassigned:
+
+```json
+{
+  "contactId": null
+}
+```
+
+The earlier assignment endpoint may remain for compatibility. Unsupported HTTP methods must return `405 Method Not Allowed`, not an unexpected `500`.
+
+---
+
+## ADR-043: Deleted-File Queries Distinguish Included from Deleted-Only
+
+**Status:** Accepted July 13, 2026
+
+Attachment-list deletion filters have distinct meanings:
+
+- No deletion parameter: active attachments only
+- `includeDeleted=true`: active and deleted attachments
+- `deletedOnly=true`: deleted attachments only
+
+The Deleted Files page must use `deletedOnly=true`.
+
+Soft deletion remains the application behavior. Deleting an attachment sets its deletion timestamp and does not physically remove its S3 object.
+
+---
+
+## ADR-044: Backend Observability Uses Correlation-Aware Safe Logging
+
+**Status:** Accepted July 13, 2026
+
+The backend will provide debugging-focused logging for API, database, authentication, and S3 workflows.
+
+### Logging Scope
+
+- Correlation ID on request and error logs
+- Tenant and authenticated-user context where available
+- Request method, safe path/query information, response status, and duration
+- Upload initialization, S3 verification, and completion
+- Assignment, unassignment, deletion, and restoration
+- Contact creation, update, and search events
+- Clear validation, authorization, database, S3, and unexpected-error categories
+- Rotating local log files
+- Optional detailed `debug` profile
+
+### Sensitive Data Rules
+
+Logs must not contain:
+
+- JWTs
+- AWS credentials
+- Complete presigned URLs
+- Raw passwords
+- Full phone numbers or email addresses unless explicitly and safely masked
+
+API problem responses continue to include a correlation ID so a frontend error can be traced to backend logs.
+
+---
+
+## ADR-045: Railway Database Bootstrap Is Reviewed and Reproducible
+
+**Status:** Accepted July 13, 2026
+
+The Railway production PostgreSQL database will be initialized through a reviewed, reproducible setup rather than by copying uncontrolled development data.
+
+The prepared setup includes:
+
+1. Preflight checks
+2. Schema creation or application migration
+3. Stable production-tenant seed
+4. Post-setup verification
+5. Transactional smoke test and cleanup
+
+### Migration Path Rule
+
+Use one schema-creation path:
+
+- If production Flyway is enabled, allow Flyway to create the schema and run only the reviewed seed and verification steps afterward.
+- If setup is manual, disable Flyway for that deployment and run the reviewed schema script.
+
+Do not run both schema-creation paths against the same fresh database.
+
+### Tenant Identity
+
+The production tenant uses one stable UUID. The same UUID must be used in:
+
+- The production `tenants` row
+- `CLIENT_FILES_TENANT_ID`
+
+### Dump Policy
+
+A new schema-only `pg_dump` is required before production setup only if the AWS development schema changed after the last verified dump.
+
+A full development data dump is not copied into Railway by default because it may contain test contacts, pending attachment rows, or references to the development S3 bucket.
+

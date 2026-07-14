@@ -356,104 +356,151 @@ The S3 integration structure is ready for a live development-bucket smoke test. 
 
 ### Session Goal
 
-Move Client Files into a usable Base44 dashboard workflow, reconcile the backend with the existing Local Roots AWS RDS schema, and begin end-to-end Base44-to-local-backend testing before production deployment.
+Move Client Files from initial Base44 connectivity into a working end-to-end file workflow, resolve frontend/backend API mismatches, improve attachment management and debugging, and prepare the production Railway database setup.
 
 ### Questions Discussed
 
-- Should the dashboard be bundled into Spring Boot or built in Base44?
-- Can one dashboard support all future Local Roots tenants?
-- Should Texas Top Dressing or lawn-specific language appear in the shared application?
-- How should Base44 authenticate with the backend?
-- Where should tenant identity come from?
-- Should Base44 connect directly to PostgreSQL or S3?
-- Should Client Files have its own database or use the existing Local Roots database?
-- Which existing RDS tables and constraints can be reused?
-- Should new Client Files contact and attachment tables be created?
-- How should nameless contacts and unassigned files work?
-- How should a partially applied migration be corrected safely?
-- Why did the SQL editor warn about broad updates or fail on a dollar-quoted function?
-- How should the final schema be verified?
-- What value should be used for `CLIENT_FILES_JWT_SECRET_BASE64`?
-- Why did Base44 receive an ngrok HTML error instead of Spring Boot JSON?
-- How should a local Git branch be synchronized when remote `main` is ahead?
+- Why did upload initialization fail with `Cannot map null into type long`?
+- Which initialization fields must Base44 send to Spring Boot?
+- Should file upload be handled by the backend or remain direct from the browser to S3?
+- Can one frontend upload method coordinate two backend endpoints?
+- Why did only the initialization request occur without an S3 `PUT` or completion request?
+- Does S3 need `ETag` in exposed CORS headers?
+- How should S3 bucket CORS be configured for Base44?
+- Why did downloaded files use the display name without an extension?
+- How should safe download filenames be generated?
+- Should `Property Maps` be replaced with `LandGlide Photos`?
+- Which dashboard view should open by default?
+- Where should the tenant business name be displayed?
+- How should a user create a new client while uploading?
+- What should happen when text is entered in client search but no result is selected?
+- Why did the contact-detail page request a missing nested attachments route?
+- Why did the Unassigned page fail when All statuses was selected?
+- How should READY images receive visible thumbnails and full-size previews?
+- Why did assigning an unassigned file return an unexpected server error?
+- Should the backend support Base44's PATCH assignment request?
+- How can backend logs make debugging easier without exposing secrets?
+- How should attachment soft deletion and restoration appear in the dashboard?
+- Why did Deleted Files show active files too?
+- What is the difference between `includeDeleted=true` and a deleted-only query?
+- Why did changing theme colors break the mobile side-menu close control?
+- How should the Railway PostgreSQL database be initialized?
+- Is another schema-only `pg_dump` required before Railway setup?
 
 ### Design Decisions
 
-- Base44 owns the dashboard; Spring Boot remains API-only.
-- The backend and production PostgreSQL will run on Railway.
-- The development backend runs locally against AWS RDS.
-- Base44 does not connect directly to PostgreSQL or use permanent AWS credentials.
-- Files upload directly to S3 using backend-issued presigned URLs.
-- The dashboard is tenant-neutral and branded **Local Roots Client Files**.
-- Tenant identity comes from a signed JWT and backend-controlled configuration, not a browser-supplied tenant ID.
-- JWT secrets remain only in backend environment configuration.
-- Client Files reuses `tenants`, `contacts`, and `contact_attachments`.
-- Parallel `client_contacts` and `client_attachments` tables will not be created.
-- Contacts may have no name but must have a phone number or email address.
-- Phone and email values are normalized for matching.
-- `contact_attachments.contact_id` may be null for unassigned files.
-- Development RDS changes are applied through reviewed manual SQL with Flyway disabled locally.
-- Migration SQL must be safe to rerun after partial execution.
-- A fresh schema-only `pg_dump` is used to verify the completed migration.
-- Base44 requests sent through free ngrok include `ngrok-skip-browser-warning: true`.
-- Backend authorization and ngrok headers are never sent to presigned S3 URLs.
-- Git `main` should be synchronized with `git pull --rebase`, not a force push.
+- Keep the direct-to-S3 architecture.
+- One frontend `uploadFile` workflow coordinates initialization, S3 `PUT`, and backend completion.
+- Keep separate backend initialization and completion endpoints.
+- The frontend must send `originalFileName` and positive numeric `sizeBytes`.
+- S3 requests receive only the presigned required headers; JWT, ngrok, and JSON API headers stay on backend requests.
+- Configure S3 CORS separately from Spring CORS for the exact Base44 origin.
+- `ETag` exposure is optional because backend completion verifies the object with `HeadObject`.
+- Download names use the display name as a sanitized base while preserving or inferring the correct file extension.
+- Keep backend category enums stable while displaying `LANDGLIDE` as **LandGlide Photos** and `PROPERTY_PHOTOS` as **Photos**.
+- Make Contacts the default root and post-login view.
+- Show the dynamic tenant business name in the sidebar from `/api/v1/auth/me`.
+- Client search text is not a selected client.
+- Unmatched non-empty client text blocks upload and opens new-client fields.
+- New clients may be nameless but require a usable phone number or email address.
+- Support `GET /api/v1/contacts/{contactId}/attachments` as a tenant-scoped route.
+- Omit frontend-only `ALL` values from category and status query parameters.
+- Use short-lived `download=false` URLs for image previews and full-size Open behavior.
+- Support `PATCH /api/v1/attachments/{attachmentId}` with a contact UUID or `null`.
+- Unsupported HTTP methods return `405` rather than an unexpected `500`.
+- Keep soft deletion; do not physically delete S3 objects.
+- Use `deletedOnly=true` for the Deleted Files page.
+- Add correlation-aware operational logging without logging secrets, complete presigned URLs, or raw personal identifiers.
+- Keep theme styling semantic so global primary-button rules do not affect neutral mobile drawer controls.
+- Initialize Railway PostgreSQL through one reviewed schema-creation path and use a stable tenant UUID.
+- Do not copy a full development data dump into Railway by default.
 
 ### Work Completed
 
-- Replaced the embedded-dashboard direction with Base44 frontend plus Railway API architecture.
-- Updated the backend for stateless JWT login and authenticated user lookup.
-- Removed the production dependency on caller-provided tenant headers.
-- Added tenant-scoped contact and attachment behavior.
-- Added Base44-compatible CORS configuration.
-- Generated the Base44 dashboard and revised it to remove tenant-specific and lawn-specific assumptions.
-- Kept backend category enum values while defining generic user-facing labels.
-- Exported and inspected the existing AWS RDS schema.
-- Adapted the backend to shared `tenants`, `contacts`, and `contact_attachments` tables.
-- Added nullable-name contact support and normalized identifiers.
-- Expanded `contact_attachments` for upload state, categories, S3 metadata, unassigned files, verification, soft deletion, and parent relationships.
-- Added tenant-name lookup for `/api/v1/auth/me`.
-- Created preflight, safe-to-rerun migration, and post-migration verification scripts.
-- Applied the integration migration to the AWS RDS development database.
-- Corrected backfill updates so they include targeted `WHERE` clauses.
-- Diagnosed PostgreSQL dollar-quoted function execution in the SQL editor.
-- Verified the completed schema with a second schema-only `pg_dump`.
-- Confirmed the expected columns, constraints, triggers, indexes, and shared tables exist without duplicate Client Files tables.
-- Defined secure generation and storage of `CLIENT_FILES_JWT_SECRET_BASE64`.
-- Diagnosed the Base44 request failure as ngrok `ERR_NGROK_6024`, not a Spring Boot API response.
-- Defined the ngrok warning-skip header for the Base44 API client.
-- Provided a safe rebase workflow for the backend Git branch.
+- Diagnosed the malformed initialization payload.
+- Corrected the Base44 upload contract from `fileName` to `originalFileName`.
+- Added `sizeBytes: file.size` to the initialization request.
+- Confirmed that apostrophes in JSON display names are valid and were not causing parsing failures.
+- Defined one frontend upload function that performs initialization, direct S3 upload, and completion.
+- Diagnosed the missing S3 request as frontend control flow rather than missing `ETag`.
+- Configured and troubleshot S3 browser CORS.
+- Confirmed that file upload now completes and the object can be viewed.
+- Confirmed that the browser successfully performs the S3 `PUT`.
+- Defined backend-controlled safe download filenames such as `bobs_lawn.png`.
+- Prepared frontend changes for LandGlide labels, Contacts default navigation, dynamic tenant name, and upload-time client creation.
+- Added support for `GET /api/v1/contacts/{contactId}/attachments`.
+- Preserved the original query-based attachment-list route.
+- Added tenant ownership validation to the nested contact attachment route.
+- Diagnosed Unassigned view failures caused by sending `status=ALL`.
+- Defined conditional query construction that omits `ALL` category and status values.
+- Defined image preview behavior using short-lived `download=false` URLs.
+- Diagnosed assignment failure from an unsupported Base44 `PATCH` request.
+- Added PATCH assignment, reassignment, and unassignment support.
+- Kept the earlier assignment endpoint for compatibility.
+- Improved unsupported-method handling to return `405 Method Not Allowed`.
+- Added debugging-focused request, correlation, operation, S3, contact, assignment, deletion, and error logging.
+- Added an optional detailed debug profile and log documentation.
+- Added frontend delete and restore behavior around the existing soft-delete endpoints.
+- Diagnosed Deleted Files showing all records because `includeDeleted=true` means active plus deleted.
+- Added the `deletedOnly=true` backend filter.
+- Added deleted-only support to contact attachment listing.
+- Defined the correct Deleted Files Base44 request.
+- Prepared a Base44 fix for the theme-related mobile navigation drawer regression.
+- Prepared Railway PostgreSQL preflight, schema, tenant-seed, verification, and smoke-test scripts.
+- Confirmed that another schema-only dump is unnecessary unless the AWS development schema changed after the verified July 13 dump.
+- Confirmed that a full development data dump should not be used by default for production.
+
+### Testing Confirmed
+
+- Login reaches the Spring Boot backend through the tunnel.
+- Upload initialization succeeds with the corrected payload.
+- Browser-to-S3 `PUT` succeeds.
+- Backend completion succeeds and produces a READY attachment.
+- Uploaded files can be opened through a temporary URL.
+- Actual image thumbnails can be displayed in the dashboard.
+- Tenant business name is available to the frontend.
+- Contact pages and attachment cards render against the shared schema.
 
 ### Unresolved Questions
 
-- Has Base44 been updated to send `ngrok-skip-browser-warning: true` to backend requests?
-- Does Spring CORS allow the exact Base44 preview origin and the ngrok development header?
-- Does login now return Spring Boot JSON and a JWT?
-- Do `/auth/me`, contact operations, attachment listing, upload, completion, download, assignment, deletion, and restoration work end to end?
-- Are any older CRM screens still assuming first and last names are non-null?
-- Should attachment categories become tenant-configurable?
-- What production account and role model is needed beyond the first administrative login?
-- How will the shared-schema migration be applied to Railway PostgreSQL?
-- What final Base44 origin will be configured in Railway and production S3 CORS?
-- Have all updated backend tests passed after the JWT and shared-schema changes?
+- Has the latest backend package been merged into the working repository so it includes all route, assignment, deleted-only, download-name, and logging changes together?
+- Has the backend been restarted and assignment/unassignment retested after the PATCH update?
+- Has Base44 switched Deleted Files from `includeDeleted=true` to `deletedOnly=true`?
+- Does the sanitized backend download filename work after the latest backend restart?
+- Has the full new-client upload flow been implemented and tested with phone-only and email-only contacts?
+- Are the Contacts default route and tenant-sidebar placement complete across desktop and mobile?
+- Is the Delete option visible in every active attachment dropdown and hidden for deleted attachments?
+- Does Restore return assigned files to the original contact and unassigned files to Unassigned?
+- Has the mobile drawer close control been corrected after the theme change?
+- Should stale `PENDING_UPLOAD` records created during failed tests be cleaned up manually before production?
+- Should Hikari `maxLifetime` or keepalive settings be tuned for the AWS RDS connection after the closed-connection warnings?
+- Has the full Maven test suite run successfully outside the restricted build environment?
+- Will Railway schema creation use Flyway or the manual reviewed script path?
+- What final Base44 production origin should be allowed by Railway CORS and production S3 CORS?
+- What production login and user-role model will follow the initial administrative login?
 
 ### Next Steps
 
-1. Add `ngrok-skip-browser-warning: true` to the centralized Base44 API client for ngrok requests.
-2. Allow the exact Base44 preview origin and development tunnel header in Spring CORS.
-3. Retest login and `/api/v1/auth/me`.
-4. Test phone-only and email-only contact creation and updates.
-5. Test All Files, Unassigned, and Deleted views.
-6. Test the full presigned S3 upload and completion flow.
-7. Test open, download, assignment, reassignment, unassignment, delete, and restore.
-8. Run the full backend test suite.
-9. Rebase, commit, and push the backend.
-10. Deploy the backend and production PostgreSQL database to Railway.
-11. Apply the reviewed production schema migration.
-12. Replace the ngrok API URL in Base44 with the Railway API URL.
-13. Configure final Base44 origins in Railway and production S3 CORS.
-14. Complete a production smoke test before uploading real client files.
+1. Merge the latest backend changes into one working branch and restart the local backend.
+2. Run the full Maven test suite.
+3. Retest assignment, reassignment, and unassignment through PATCH.
+4. Change the Base44 Deleted Files request to `deletedOnly=true`.
+5. Verify delete and restore from All Files, Unassigned, contact detail, and Deleted views.
+6. Verify safe download names and extensions.
+7. Finish and test upload-time new-client creation.
+8. Verify Contacts as the default route and tenant name in the sidebar.
+9. Verify image preview caching and full-size Open behavior.
+10. Correct and retest the mobile drawer after theme changes.
+11. Review and clean stale test `PENDING_UPLOAD` records and any related abandoned S3 objects.
+12. Monitor Hikari warnings and tune connection-pool lifetime settings if they continue.
+13. Choose the Railway schema-creation path and initialize Railway PostgreSQL.
+14. Seed the stable production tenant UUID and use it for `CLIENT_FILES_TENANT_ID`.
+15. Deploy the backend to Railway and replace the ngrok URL in Base44.
+16. Configure final Base44 and S3 production origins.
+17. Complete a production smoke test before uploading operational client files.
 
 ### Session End State
 
-The Base44 dashboard exists, the backend now uses stateless JWT authentication and shared Local Roots database tables, and the AWS RDS development schema has been migrated and verified. The immediate blocker is the ngrok warning page: Base44 must add the tunnel-specific header and the backend must allow it through CORS before end-to-end testing can continue.
+The core Client Files workflow is now functional in development: Base44 can initialize an attachment, upload the original file directly to the private S3 development bucket, complete backend verification, display the attachment, and open the stored file.
+
+The session also produced backend compatibility fixes for contact file routes, PATCH assignment, deleted-only listing, safe download filenames, and correlation-aware logging. The main remaining work is to consolidate and verify the latest backend build, finish the remaining Base44 interaction details, run the complete test suite, and initialize the Railway production database.
