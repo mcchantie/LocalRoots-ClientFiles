@@ -12,6 +12,8 @@ import com.localroots.clientfiles.common.UploadVerificationException;
 import com.localroots.clientfiles.contact.ContactService;
 import com.localroots.clientfiles.security.ClientFilesSecurityProperties;
 import com.localroots.clientfiles.storage.S3StorageService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -27,6 +29,8 @@ import java.util.UUID;
 
 @Service
 public class AttachmentService {
+
+    private static final Logger log = LoggerFactory.getLogger(AttachmentService.class);
 
     private final AttachmentRepository repository;
     private final S3StorageService storageService;
@@ -50,6 +54,16 @@ public class AttachmentService {
 
     @Transactional
     public InitializeUploadResponse initializeUpload(UUID tenantId, InitializeUploadRequest request) {
+        log.info(
+                "Initializing attachment upload contactId={} estimateId={} parentAttachmentId={} category={} originalFileName={} sizeBytes={} contentType={}",
+                request.contactId(),
+                request.estimateId(),
+                request.parentAttachmentId(),
+                request.category(),
+                request.originalFileName(),
+                request.sizeBytes(),
+                request.contentType()
+        );
         validateRelatedRecords(tenantId, request.contactId(), request.estimateId(), request.parentAttachmentId());
 
         String contentType = storageService.normalizeContentType(request.contentType());
@@ -96,10 +110,27 @@ public class AttachmentService {
         );
 
         repository.save(entity);
+        log.info(
+                "Pending attachment created attachmentId={} contactId={} status={} fileKind={} s3Bucket={} s3Key={}",
+                entity.getId(),
+                entity.getContactId(),
+                entity.getStatus(),
+                entity.getFileKind(),
+                entity.getS3Bucket(),
+                entity.getS3Key()
+        );
+
         S3StorageService.PresignedUpload upload = storageService.presignUpload(
                 entity.getS3Key(),
                 entity.getContentType(),
                 entity.getChecksumSha256Base64()
+        );
+
+        log.info(
+                "Attachment upload initialized attachmentId={} expiresAt={} requiredHeaderNames={}",
+                entity.getId(),
+                upload.expiresAt(),
+                upload.requiredHeaders().keySet()
         );
 
         return new InitializeUploadResponse(
@@ -114,10 +145,12 @@ public class AttachmentService {
 
     @Transactional(noRollbackFor = UploadVerificationException.class)
     public AttachmentResponse completeUpload(UUID tenantId, UUID attachmentId) {
+        log.info("Completing attachment upload attachmentId={}", attachmentId);
         AttachmentEntity entity = requireAttachment(tenantId, attachmentId);
         requireNotDeleted(entity);
 
         if (entity.getStatus() == AttachmentStatus.READY) {
+            log.info("Attachment upload was already complete attachmentId={} status={}", attachmentId, entity.getStatus());
             return AttachmentResponse.from(entity, objectMapper);
         }
         if (entity.getStatus() != AttachmentStatus.PENDING_UPLOAD) {
@@ -134,13 +167,31 @@ public class AttachmentService {
                 entity.getChecksumSha256Base64() != null
         );
 
+        log.debug(
+                "Comparing uploaded object with pending attachment attachmentId={} declaredSizeBytes={} actualSizeBytes={} expectedContentType={} actualContentType={} checksumExpected={} checksumReturned={}",
+                attachmentId,
+                entity.getDeclaredSizeBytes(),
+                uploaded.sizeBytes(),
+                entity.getContentType(),
+                uploaded.contentType(),
+                entity.getChecksumSha256Base64() != null,
+                uploaded.checksumSha256Base64() != null
+        );
         verifyUploadedObject(entity, uploaded);
         entity.markReady(uploaded.sizeBytes(), uploaded.etag());
+        log.info(
+                "Attachment upload completed attachmentId={} status={} sizeBytes={} etagPresent={}",
+                attachmentId,
+                entity.getStatus(),
+                uploaded.sizeBytes(),
+                uploaded.etag() != null
+        );
         return AttachmentResponse.from(entity, objectMapper);
     }
 
     @Transactional(readOnly = true)
     public AttachmentResponse get(UUID tenantId, UUID attachmentId, boolean includeDeleted) {
+        log.debug("Loading attachment attachmentId={} includeDeleted={}", attachmentId, includeDeleted);
         AttachmentEntity entity = requireAttachment(tenantId, attachmentId);
         if (!includeDeleted) {
             requireNotDeleted(entity);
@@ -156,11 +207,23 @@ public class AttachmentService {
             AttachmentStatus status,
             boolean unassigned,
             boolean includeDeleted,
+            boolean deletedOnly,
             int page,
             int size
     ) {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), 100);
+        log.debug(
+                "Listing attachments contactId={} category={} status={} unassigned={} includeDeleted={} deletedOnly={} page={} size={}",
+                contactId,
+                category,
+                status,
+                unassigned,
+                includeDeleted,
+                deletedOnly,
+                safePage,
+                safeSize
+        );
 
         Specification<AttachmentEntity> specification = tenantSpecification(tenantId);
         if (contactId != null) {
@@ -174,7 +237,9 @@ public class AttachmentService {
         if (status != null) {
             specification = specification.and((root, query, cb) -> cb.equal(root.get("status"), status));
         }
-        if (!includeDeleted) {
+        if (deletedOnly) {
+            specification = specification.and((root, query, cb) -> cb.isNotNull(root.get("deletedAt")));
+        } else if (!includeDeleted) {
             specification = specification.and((root, query, cb) -> cb.isNull(root.get("deletedAt")));
         }
 
@@ -183,11 +248,23 @@ public class AttachmentService {
                         PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"))
                 )
                 .map(entity -> AttachmentResponse.from(entity, objectMapper));
+        log.info(
+                "Attachments listed contactId={} unassigned={} includeDeleted={} deletedOnly={} returned={} total={} page={} totalPages={}",
+                contactId,
+                unassigned,
+                includeDeleted,
+                deletedOnly,
+                responsePage.getNumberOfElements(),
+                responsePage.getTotalElements(),
+                responsePage.getNumber(),
+                responsePage.getTotalPages()
+        );
         return PageResponse.from(responsePage);
     }
 
     @Transactional(readOnly = true)
     public DownloadUrlResponse createDownloadUrl(UUID tenantId, UUID attachmentId, boolean download) {
+        log.info("Creating attachment read URL attachmentId={} mode={}", attachmentId, download ? "download" : "inline");
         AttachmentEntity entity = requireAttachment(tenantId, attachmentId);
         requireNotDeleted(entity);
 
@@ -200,25 +277,41 @@ public class AttachmentService {
         }
 
         assertStorageLocation(entity, tenantId);
+        String downloadFileName = DownloadFileNameBuilder.build(
+                entity.getDisplayName(),
+                entity.getOriginalFileName(),
+                entity.getContentType()
+        );
         S3StorageService.PresignedDownload presigned = storageService.presignDownload(
                 entity.getS3Key(),
-                entity.getDisplayName(),
+                downloadFileName,
                 download
+        );
+        log.info(
+                "Attachment read URL created attachmentId={} mode={} fileName={} expiresAt={}",
+                attachmentId,
+                download ? "download" : "inline",
+                downloadFileName,
+                presigned.expiresAt()
         );
         return new DownloadUrlResponse(entity.getId(), presigned.url(), presigned.expiresAt());
     }
 
     @Transactional
     public AttachmentResponse softDelete(UUID tenantId, UUID attachmentId) {
+        log.info("Soft deleting attachment attachmentId={}", attachmentId);
         AttachmentEntity entity = requireAttachment(tenantId, attachmentId);
         entity.softDelete();
+        log.info("Attachment soft deleted attachmentId={} deletedAt={}", attachmentId, entity.getDeletedAt());
         return AttachmentResponse.from(entity, objectMapper);
     }
 
     @Transactional
     public AttachmentResponse restore(UUID tenantId, UUID attachmentId) {
+        log.info("Restoring attachment attachmentId={}", attachmentId);
         AttachmentEntity entity = requireAttachment(tenantId, attachmentId);
         entity.restore();
+        log.info("Attachment restored attachmentId={} status={}", attachmentId, entity.getStatus());
         return AttachmentResponse.from(entity, objectMapper);
     }
 
@@ -226,14 +319,31 @@ public class AttachmentService {
     public AttachmentResponse assignToContact(UUID tenantId, UUID attachmentId, UUID contactId) {
         AttachmentEntity entity = requireAttachment(tenantId, attachmentId);
         requireNotDeleted(entity);
+        UUID previousContactId = entity.getContactId();
+        log.info(
+                "Changing attachment assignment attachmentId={} previousContactId={} requestedContactId={}",
+                attachmentId,
+                previousContactId,
+                contactId
+        );
         validateRelatedRecords(tenantId, contactId, null, null);
         entity.assignContact(contactId);
+        log.info(
+                "Attachment assignment changed attachmentId={} previousContactId={} contactId={} action={}",
+                attachmentId,
+                previousContactId,
+                entity.getContactId(),
+                contactId == null ? "UNASSIGN" : previousContactId == null ? "ASSIGN" : "REASSIGN"
+        );
         return AttachmentResponse.from(entity, objectMapper);
     }
 
     private AttachmentEntity requireAttachment(UUID tenantId, UUID attachmentId) {
         return repository.findByIdAndTenantId(attachmentId, tenantId)
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Attachment not found", "No attachment was found for this tenant."));
+                .orElseThrow(() -> {
+                    log.warn("Attachment lookup failed attachmentId={}", attachmentId);
+                    return new ApiException(HttpStatus.NOT_FOUND, "Attachment not found", "No attachment was found for this tenant.");
+                });
     }
 
     private void requireNotDeleted(AttachmentEntity entity) {
@@ -353,6 +463,7 @@ public class AttachmentService {
     }
 
     private void failVerification(AttachmentEntity entity, String reason) {
+        log.warn("Attachment upload verification failed attachmentId={} reason={}", entity.getId(), reason);
         entity.markFailed(reason);
         repository.save(entity);
         throw new UploadVerificationException(reason);

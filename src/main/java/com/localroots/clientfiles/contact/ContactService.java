@@ -2,6 +2,8 @@ package com.localroots.clientfiles.contact;
 
 import com.localroots.clientfiles.api.PageResponse;
 import com.localroots.clientfiles.common.ApiException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -16,6 +18,8 @@ import java.util.UUID;
 @Service
 public class ContactService {
 
+    private static final Logger log = LoggerFactory.getLogger(ContactService.class);
+
     private final ContactRepository repository;
 
     public ContactService(ContactRepository repository) {
@@ -24,6 +28,13 @@ public class ContactService {
 
     @Transactional
     public ContactResponse create(UUID tenantId, ContactRequest request) {
+        log.info(
+                "Creating contact namePresent={} phonePresent={} emailPresent={}",
+                hasAnyName(request),
+                hasText(request.phone()),
+                hasText(request.email())
+        );
+
         Values values = validateAndNormalize(request);
         rejectDuplicates(tenantId, values, null);
 
@@ -39,11 +50,27 @@ public class ContactService {
                 values.normalizedEmail(),
                 values.notes()
         );
-        return ContactResponse.from(repository.save(entity));
+        ContactResponse response = ContactResponse.from(repository.save(entity));
+        log.info(
+                "Contact created contactId={} displayNamePresent={} phonePresent={} emailPresent={}",
+                response.id(),
+                values.displayName() != null,
+                values.normalizedPhone() != null,
+                values.normalizedEmail() != null
+        );
+        return response;
     }
 
     @Transactional
     public ContactResponse update(UUID tenantId, UUID contactId, ContactRequest request) {
+        log.info(
+                "Updating contact contactId={} namePresent={} phonePresent={} emailPresent={}",
+                contactId,
+                hasAnyName(request),
+                hasText(request.phone()),
+                hasText(request.email())
+        );
+
         ContactEntity entity = requireContact(tenantId, contactId);
         Values values = validateAndNormalize(request);
         rejectDuplicates(tenantId, values, entity);
@@ -57,11 +84,14 @@ public class ContactService {
                 values.normalizedEmail(),
                 values.notes()
         );
-        return ContactResponse.from(entity);
+        ContactResponse response = ContactResponse.from(entity);
+        log.info("Contact updated contactId={}", contactId);
+        return response;
     }
 
     @Transactional(readOnly = true)
     public ContactResponse get(UUID tenantId, UUID contactId) {
+        log.debug("Loading contact contactId={}", contactId);
         return ContactResponse.from(requireContact(tenantId, contactId));
     }
 
@@ -69,9 +99,18 @@ public class ContactService {
     public PageResponse<ContactResponse> list(UUID tenantId, String search, int page, int size) {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), 100);
+        String term = blankToNull(search);
+
+        log.debug(
+                "Listing contacts searchPresent={} searchLength={} page={} size={}",
+                term != null,
+                term == null ? 0 : term.length(),
+                safePage,
+                safeSize
+        );
+
         Specification<ContactEntity> specification = (root, query, cb) -> cb.equal(root.get("tenantId"), tenantId);
 
-        String term = blankToNull(search);
         if (term != null) {
             String like = "%" + term.toLowerCase(Locale.ROOT) + "%";
             String phoneDigits = normalizePhone(term);
@@ -99,20 +138,34 @@ public class ContactService {
                                 .and(Sort.by(Sort.Direction.DESC, "createdAt")))
                 )
                 .map(ContactResponse::from);
+
+        log.info(
+                "Contacts listed searchPresent={} returned={} total={} page={} totalPages={}",
+                term != null,
+                response.getNumberOfElements(),
+                response.getTotalElements(),
+                response.getNumber(),
+                response.getTotalPages()
+        );
         return PageResponse.from(response);
     }
 
     public boolean belongsToTenant(UUID tenantId, UUID contactId) {
-        return repository.existsByIdAndTenantId(contactId, tenantId);
+        boolean belongs = repository.existsByIdAndTenantId(contactId, tenantId);
+        log.debug("Contact tenant ownership checked contactId={} belongs={}", contactId, belongs);
+        return belongs;
     }
 
     private ContactEntity requireContact(UUID tenantId, UUID contactId) {
         return repository.findByIdAndTenantId(contactId, tenantId)
-                .orElseThrow(() -> new ApiException(
-                        HttpStatus.NOT_FOUND,
-                        "Contact not found",
-                        "No contact was found for this tenant."
-                ));
+                .orElseThrow(() -> {
+                    log.warn("Contact lookup failed contactId={}", contactId);
+                    return new ApiException(
+                            HttpStatus.NOT_FOUND,
+                            "Contact not found",
+                            "No contact was found for this tenant."
+                    );
+                });
     }
 
     private Values validateAndNormalize(ContactRequest request) {
@@ -122,6 +175,7 @@ public class ContactService {
         String normalizedEmail = email == null ? null : email.toLowerCase(Locale.ROOT);
 
         if (normalizedPhone == null && normalizedEmail == null) {
+            log.warn("Contact validation failed because neither phone nor email was supplied");
             throw new ApiException(
                     HttpStatus.BAD_REQUEST,
                     "Contact needs an identifier",
@@ -154,13 +208,23 @@ public class ContactService {
         if (values.normalizedPhone() != null
                 && repository.existsByTenantIdAndNormalizedPhone(tenantId, values.normalizedPhone())
                 && (current == null || !values.normalizedPhone().equals(current.getNormalizedPhone()))) {
+            log.warn("Contact duplicate rejected field=phone currentContactId={}", current == null ? null : current.getId());
             throw new ApiException(HttpStatus.CONFLICT, "Phone number already exists", "A contact already uses this phone number.");
         }
         if (values.normalizedEmail() != null
                 && repository.existsByTenantIdAndNormalizedEmail(tenantId, values.normalizedEmail())
                 && (current == null || !values.normalizedEmail().equals(current.getNormalizedEmail()))) {
+            log.warn("Contact duplicate rejected field=email currentContactId={}", current == null ? null : current.getId());
             throw new ApiException(HttpStatus.CONFLICT, "Email address already exists", "A contact already uses this email address.");
         }
+    }
+
+    private boolean hasAnyName(ContactRequest request) {
+        return hasText(request.firstName()) || hasText(request.lastName()) || hasText(request.displayName());
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private String normalizePhone(String value) {

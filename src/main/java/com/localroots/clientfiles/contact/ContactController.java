@@ -1,6 +1,10 @@
 package com.localroots.clientfiles.contact;
 
+import com.localroots.clientfiles.api.AttachmentResponse;
 import com.localroots.clientfiles.api.PageResponse;
+import com.localroots.clientfiles.attachment.AttachmentCategory;
+import com.localroots.clientfiles.attachment.AttachmentService;
+import com.localroots.clientfiles.attachment.AttachmentStatus;
 import com.localroots.clientfiles.security.RequestTenantResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -26,10 +30,16 @@ import java.util.UUID;
 public class ContactController {
 
     private final ContactService contactService;
+    private final AttachmentService attachmentService;
     private final RequestTenantResolver tenantResolver;
 
-    public ContactController(ContactService contactService, RequestTenantResolver tenantResolver) {
+    public ContactController(
+            ContactService contactService,
+            AttachmentService attachmentService,
+            RequestTenantResolver tenantResolver
+    ) {
         this.contactService = contactService;
+        this.attachmentService = attachmentService;
         this.tenantResolver = tenantResolver;
     }
 
@@ -52,6 +62,36 @@ public class ContactController {
     @GetMapping("/{contactId}")
     public ContactResponse get(HttpServletRequest request, @PathVariable UUID contactId) {
         return contactService.get(tenantResolver.requireTenantId(request), contactId);
+    }
+
+    @GetMapping("/{contactId}/attachments")
+    public PageResponse<AttachmentResponse> listAttachments(
+            HttpServletRequest request,
+            @PathVariable UUID contactId,
+            @RequestParam(required = false) AttachmentCategory category,
+            @RequestParam(required = false) AttachmentStatus status,
+            @RequestParam(defaultValue = "false") boolean includeDeleted,
+            @RequestParam(defaultValue = "false") boolean deletedOnly,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size
+    ) {
+        UUID tenantId = tenantResolver.requireTenantId(request);
+
+        // A nested contact route should return 404 when the contact does not exist
+        // for the authenticated tenant instead of silently returning an empty page.
+        contactService.get(tenantId, contactId);
+
+        return attachmentService.list(
+                tenantId,
+                contactId,
+                category,
+                status,
+                false,
+                includeDeleted,
+                deletedOnly,
+                page,
+                size
+        );
     }
 
     @PutMapping("/{contactId}")

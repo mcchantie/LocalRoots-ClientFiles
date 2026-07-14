@@ -2,6 +2,8 @@ package com.localroots.clientfiles.storage;
 
 import com.localroots.clientfiles.attachment.AttachmentCategory;
 import com.localroots.clientfiles.common.ApiException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class S3StorageService {
+
+    private static final Logger log = LoggerFactory.getLogger(S3StorageService.class);
 
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
@@ -73,6 +77,18 @@ public class S3StorageService {
         return maxFileSize.toBytes();
     }
 
+    public Duration uploadUrlTtl() {
+        return uploadUrlTtl;
+    }
+
+    public Duration downloadUrlTtl() {
+        return downloadUrlTtl;
+    }
+
+    public Set<String> allowedContentTypes() {
+        return allowedContentTypes;
+    }
+
     public boolean isAllowedContentType(String contentType) {
         return allowedContentTypes.contains(normalizeContentType(contentType));
     }
@@ -91,13 +107,21 @@ public class S3StorageService {
                 .toLowerCase(Locale.ROOT)
                 .replace('_', '-');
 
-        return "tenants/%s/contacts/%s/attachments/%s/original/%s/%s".formatted(
+        String key = "tenants/%s/contacts/%s/attachments/%s/original/%s/%s".formatted(
                 tenantId,
                 contactSegment,
                 attachmentId,
                 categorySegment,
                 sanitizeFileName(fileName)
         );
+        log.debug(
+                "Built attachment S3 key attachmentId={} contactId={} category={} key={}",
+                attachmentId,
+                contactId,
+                category,
+                key
+        );
+        return key;
     }
 
     public PresignedUpload presignUpload(
@@ -105,6 +129,15 @@ public class S3StorageService {
             String contentType,
             String checksumSha256Base64
     ) {
+        log.debug(
+                "Creating presigned S3 upload bucket={} key={} contentType={} checksumRequired={} ttl={}",
+                bucket,
+                key,
+                normalizeContentType(contentType),
+                checksumSha256Base64 != null && !checksumSha256Base64.isBlank(),
+                uploadUrlTtl
+        );
+
         PutObjectRequest.Builder putObjectRequest = PutObjectRequest.builder()
                 .bucket(bucket)
                 .key(key)
@@ -137,9 +170,18 @@ public class S3StorageService {
             }
         });
 
+        Instant expiresAt = Instant.now().plus(uploadUrlTtl);
+        log.info(
+                "Presigned S3 upload created bucket={} key={} expiresAt={} requiredHeaderNames={}",
+                bucket,
+                key,
+                expiresAt,
+                requiredHeaders.keySet()
+        );
+
         return new PresignedUpload(
                 URI.create(presigned.url().toString()),
-                Instant.now().plus(uploadUrlTtl),
+                expiresAt,
                 Map.copyOf(requiredHeaders)
         );
     }
@@ -148,6 +190,13 @@ public class S3StorageService {
             String key,
             boolean includeChecksum
     ) {
+        log.debug(
+                "Checking uploaded S3 object bucket={} key={} includeChecksum={}",
+                bucket,
+                key,
+                includeChecksum
+        );
+
         HeadObjectRequest.Builder request = HeadObjectRequest.builder()
                 .bucket(bucket)
                 .key(key);
@@ -160,15 +209,26 @@ public class S3StorageService {
             HeadObjectResponse response =
                     s3Client.headObject(request.build());
 
-            return new UploadedObject(
+            UploadedObject uploadedObject = new UploadedObject(
                     response.contentLength(),
                     normalizeContentType(response.contentType()),
                     trimQuotes(response.eTag()),
                     response.checksumSHA256()
             );
+            log.info(
+                    "S3 object verified bucket={} key={} sizeBytes={} contentType={} etagPresent={} checksumPresent={}",
+                    bucket,
+                    key,
+                    uploadedObject.sizeBytes(),
+                    uploadedObject.contentType(),
+                    uploadedObject.etag() != null,
+                    uploadedObject.checksumSha256Base64() != null
+            );
+            return uploadedObject;
 
         } catch (software.amazon.awssdk.services.s3.model.S3Exception exception) {
             if (exception.statusCode() == 404) {
+                log.warn("S3 object was not found during upload completion bucket={} key={}", bucket, key);
                 throw new ApiException(
                         HttpStatus.CONFLICT,
                         "Upload is not present in S3",
@@ -186,6 +246,15 @@ public class S3StorageService {
             String fileName,
             boolean download
     ) {
+        log.debug(
+                "Creating presigned S3 read URL bucket={} key={} mode={} fileName={} ttl={}",
+                bucket,
+                key,
+                download ? "download" : "inline",
+                fileName,
+                downloadUrlTtl
+        );
+
         String disposition = (download ? "attachment" : "inline")
                 + "; filename*=UTF-8''"
                 + rfc5987(fileName);
@@ -204,9 +273,17 @@ public class S3StorageService {
                                 .build()
                 );
 
+        Instant expiresAt = Instant.now().plus(downloadUrlTtl);
+        log.info(
+                "Presigned S3 read URL created bucket={} key={} mode={} expiresAt={}",
+                bucket,
+                key,
+                download ? "download" : "inline",
+                expiresAt
+        );
         return new PresignedDownload(
                 URI.create(presigned.url().toString()),
-                Instant.now().plus(downloadUrlTtl)
+                expiresAt
         );
     }
 
@@ -217,6 +294,7 @@ public class S3StorageService {
         String expectedPrefix = "tenants/%s/".formatted(tenantId);
 
         if (key == null || !key.startsWith(expectedPrefix)) {
+            log.error("S3 tenant key validation failed tenantId={} expectedPrefix={} actualKey={}", tenantId, expectedPrefix, key);
             throw new IllegalStateException(
                     "Stored S3 key does not match the attachment tenant."
             );
