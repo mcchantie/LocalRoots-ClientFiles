@@ -684,7 +684,7 @@ The locally running backend continues to use the AWS RDS development database. S
 
 ### Tooling Note
 
-PostgreSQL function bodies enclosed in dollar quotes must be executed as complete statements. SQL editors that split at internal semicolons can produce an unterminated dollar-quoted string error; executing the full script or using `psql` avoids it.
+PostgreSQL function bodies enclosed in dollar quotes must be executed as complete statements. SQL editors that split at internal semicolons can produce an unterminated dollar-quoted string error. In DataGrip, use **SQL Scripts → Run SQL Script…** for the complete file, or select the entire function or `DO` block from its opening statement through the closing `$$;` before executing it. Executing only the statement at the cursor may stop at an internal PL/pgSQL semicolon and send an incomplete block to PostgreSQL. Using `psql` is also acceptable.
 
 ---
 
@@ -1027,4 +1027,75 @@ The production tenant uses one stable UUID. The same UUID must be used in:
 A new schema-only `pg_dump` is required before production setup only if the AWS development schema changed after the last verified dump.
 
 A full development data dump is not copied into Railway by default because it may contain test contacts, pending attachment rows, or references to the development S3 bucket.
+
+---
+
+## ADR-046: PostgreSQL Generates Tenant IDs and Creation Timestamps
+
+**Status:** Accepted July 14, 2026
+
+The `tenants` table will generate tenant UUIDs and creation timestamps in PostgreSQL.
+
+### Defaults
+
+```sql
+ALTER TABLE tenants
+    ALTER COLUMN id SET DEFAULT gen_random_uuid();
+```
+
+The existing `created_at` default remains `now()`.
+
+### Insert Behavior
+
+Normal tenant inserts omit both `id` and `created_at` and use `RETURNING` to retrieve the generated values. The generated UUID is created once and then becomes the stable production tenant identifier used by the application, including `CLIENT_FILES_TENANT_ID`.
+
+### Rationale
+
+Database-generated identifiers and timestamps keep tenant creation consistent across administrative scripts and future application code while avoiding manually constructed UUIDs or client-generated timestamps.
+
+---
+
+## ADR-047: Estimater Saves Structured Data and an Immutable PDF Snapshot
+
+**Status:** Accepted July 14, 2026
+
+Estimater will save each estimate in two connected forms:
+
+1. Structured estimate and line-item data in PostgreSQL as the editable source of truth.
+2. A generated PDF in S3 with a linked `contact_attachments` record as the client-facing snapshot.
+
+### Client Files Attachment Values
+
+The generated estimate artifact will normally use:
+
+- `content_type = application/pdf`
+- `category = ESTIMATES`
+- `file_kind = DOCUMENT`
+- The selected `contact_id`
+- The related `estimate_id`
+- `status = READY` after successful storage
+
+Google Docs and Microsoft Word files are not the canonical estimate format and are not required for the initial integration.
+
+### Revision Rule
+
+An estimate revision creates a new version and a new PDF snapshot rather than overwriting a PDF that may already have been presented to a client.
+
+---
+
+## ADR-048: Local Railway Database Administration Uses the Public TCP Proxy
+
+**Status:** Accepted July 14, 2026
+
+Database tools running outside Railway, including DataGrip on a developer workstation, connect to Railway PostgreSQL through the service's public TCP proxy and use SSL.
+
+### Rules
+
+- Use the public proxy hostname and externally assigned proxy port.
+- Do not use the Railway private service hostname from a local workstation.
+- Do not assume the external port is PostgreSQL's internal port `5432`.
+- Use the database name, username, and password from the Railway PostgreSQL service variables.
+- Keep credentials out of committed project files and documentation.
+
+The private Railway hostname remains appropriate only for services running inside Railway's private network.
 

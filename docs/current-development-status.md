@@ -1,6 +1,6 @@
 # Client Files Current Development Status
 
-**Last updated:** July 13, 2026
+**Last updated:** July 14, 2026
 
 ## Current Phase
 
@@ -18,7 +18,7 @@ Base44
 
 Uploaded files can be opened through short-lived S3 URLs, and image thumbnails can be displayed in the dashboard.
 
-The next phase is to consolidate and verify the latest backend changes, finish the remaining Base44 behaviors, run the full test suite, and initialize the Railway production database.
+The current focus is completing and verifying the Railway production database bootstrap, committing and testing the consolidated backend changes, deploying the backend to Railway, and then completing the production integration smoke test.
 
 ## Current Architecture
 
@@ -67,8 +67,10 @@ Development and production use separate databases, buckets, AWS credentials, JWT
 - All Files and Unassigned attachment retrieval when frontend-only `ALL` filter values are omitted
 - Shared `tenants`, `contacts`, and `contact_attachments` schema
 - Soft-delete and restore backend operations
+- External Railway PostgreSQL access from DataGrip through the public TCP proxy
+- SQL execution reaches the Railway PostgreSQL server
 
-## Backend Updates Prepared During This Session
+## Backend Updates Prepared During July 13
 
 The backend updates produced during testing include:
 
@@ -208,34 +210,70 @@ Use one creation path:
 
 Do not run both schema-creation paths.
 
-The production tenant uses one stable UUID, also supplied as:
+### Current Railway Database State
+
+- DataGrip can connect from the local Mac through Railway's public TCP proxy using SSL.
+- The reviewed schema script was attempted against Railway PostgreSQL.
+- Execution stopped inside the first PL/pgSQL function with an `unterminated dollar-quoted string` error because DataGrip submitted only part of the dollar-quoted block.
+- The SQL file contains the closing delimiter; the fix is to use **SQL Scripts → Run SQL Script…** or execute the entire selected function or `DO` block.
+- The Railway migration must not be treated as complete until the verification queries pass.
+
+### Production Tenant Bootstrap
+
+The `tenants` table should generate its UUID and timestamp in PostgreSQL:
+
+```sql
+ALTER TABLE tenants
+ALTER COLUMN id SET DEFAULT gen_random_uuid();
+```
+
+Normal production tenant insertion omits `id` and `created_at`, uses `RETURNING`, and saves the returned UUID as:
 
 ```text
 CLIENT_FILES_TENANT_ID
 ```
 
+The production JWT signing key is generated separately with:
+
+```bash
+openssl rand -base64 32
+```
+
+and stored as:
+
+```text
+CLIENT_FILES_JWT_SECRET_BASE64
+```
+
 A new schema-only `pg_dump` is needed only if the AWS development schema changed after the last verified dump. A full development data dump should not be copied into Railway by default.
+
+
+## Estimater Integration Decision
+
+Estimater will not use Google Docs or Word files as the canonical saved estimate. It will save:
+
+1. Structured estimate and line-item data in PostgreSQL as the editable source of truth.
+2. A generated, versioned PDF in S3 with a linked Client Files attachment record.
+
+The PDF attachment will use `application/pdf`, category `ESTIMATES`, file kind `DOCUMENT`, the selected contact, and the related estimate ID. Revisions create new PDF snapshots rather than replacing an estimate that may already have been sent.
 
 ## Immediate Next Steps
 
-1. Consolidate all backend fixes into the active repository branch.
-2. Restart the backend and run the full Maven test suite.
-3. Retest assignment, reassignment, and unassignment.
-4. Switch Base44 Deleted Files to `deletedOnly=true`.
-5. Verify Delete and Restore across all attachment views.
-6. Verify sanitized download filenames.
-7. Complete and test upload-time new-client creation.
-8. Verify Contacts as the default view and tenant name placement.
-9. Retest image preview caching and full-size viewing.
-10. Fix and retest the mobile navigation drawer theme regression.
-11. Review stale `PENDING_UPLOAD` rows and abandoned development objects.
-12. Review Hikari connection lifetime settings if warnings continue.
-13. Choose the Railway schema-creation path.
-14. Initialize Railway PostgreSQL and seed the stable production tenant.
-15. Deploy the backend to Railway.
-16. Replace the ngrok API URL in Base44 with the Railway URL.
-17. Configure final production Base44 and S3 CORS origins.
-18. Perform a production smoke test before operational use.
+1. Rerun the complete Railway schema script through DataGrip using **Run SQL Script**.
+2. Verify the Railway tables, columns, constraints, indexes, functions, and triggers.
+3. Apply the database-generated UUID default to `tenants.id` if needed.
+4. Insert the production tenant and capture the generated UUID.
+5. Set `CLIENT_FILES_TENANT_ID` and `CLIENT_FILES_JWT_SECRET_BASE64` in Railway.
+6. Create the attachment, observability, and documentation Git commits; verify `logs/` is ignored; push to `origin/main`.
+7. Run the full Maven test suite.
+8. Retest assignment, reassignment, unassignment, delete, restore, and safe download filenames.
+9. Complete and test upload-time new-client creation.
+10. Verify Contacts as the default view, tenant name placement, and the mobile navigation drawer.
+11. Deploy the backend to Railway and verify startup against Railway PostgreSQL.
+12. Replace the ngrok API URL in Base44 with the Railway backend URL.
+13. Configure final production Base44 and S3 CORS origins.
+14. Perform a production login, contact, upload, open, download, assignment, deletion, and restoration smoke test.
+15. Design the initial structured estimate tables and implement PDF generation for direct Estimater-to-Client Files saving.
 
 ## Deferred Work
 
@@ -247,5 +285,5 @@ A new schema-only `pg_dump` is needed only if the AWS development schema changed
 - Thumbnail generation service
 - LandGlide crop processing
 - Physical S3 purge after retention
-- Estimate PDF generation and structured Estimater records
+- Implementation of estimate PDF generation and structured Estimater records
 - Production monitoring, audit reporting, and backup-restore drills

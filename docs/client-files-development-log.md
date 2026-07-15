@@ -504,3 +504,91 @@ Move Client Files from initial Base44 connectivity into a working end-to-end fil
 The core Client Files workflow is now functional in development: Base44 can initialize an attachment, upload the original file directly to the private S3 development bucket, complete backend verification, display the attachment, and open the stored file.
 
 The session also produced backend compatibility fixes for contact file routes, PATCH assignment, deleted-only listing, safe download filenames, and correlation-aware logging. The main remaining work is to consolidate and verify the latest backend build, finish the remaining Base44 interaction details, run the complete test suite, and initialize the Railway production database.
+
+---
+
+## Session: July 14, 2026
+
+### Session Goal
+
+Connect DataGrip to the Railway production PostgreSQL service, begin the reviewed database bootstrap, diagnose SQL-script execution problems, prepare the production tenant seed, organize the backend changes into clear Git commits, and finalize how Estimater will save estimates into Client Files.
+
+### Questions Discussed
+
+- Which Railway PostgreSQL host and port should DataGrip use from a local Mac?
+- Should DataGrip use Railway's private PostgreSQL hostname or the public TCP proxy?
+- Why did the schema script fail with `unterminated dollar-quoted string` inside a PL/pgSQL function?
+- Does using DataGrip instead of DBeaver change how the script should be executed?
+- How can the `tenants` table generate both the UUID and creation timestamp automatically?
+- How should the production tenant insert return the generated UUID?
+- How should the current backend, logging, tests, and documentation changes be divided into Git commits?
+- How should generated local log files be kept out of Git?
+- What command should generate the Base64 JWT signing secret?
+- Should an estimate stored in Client Files be a Google Doc, Word document, or PDF?
+- How should Estimater save an estimate directly into Client Files?
+
+### Design Decisions
+
+- DataGrip running locally connects to Railway PostgreSQL through the public TCP proxy, not the private Railway hostname.
+- The external proxy port is used rather than assuming port `5432`, and SSL is required for the connection.
+- PostgreSQL functions and `DO` blocks enclosed in `$$ ... $$` must be executed as complete blocks.
+- In DataGrip, the preferred approach is **SQL Scripts → Run SQL Script…** for the full file or executing a selection that includes the entire opening and closing dollar-quoted block.
+- The `tenants.id` column should default to `gen_random_uuid()` and `created_at` should continue to default to `now()`.
+- Tenant inserts normally omit `id` and `created_at`, use `RETURNING`, and then use the returned UUID as `CLIENT_FILES_TENANT_ID`.
+- Generated `logs/` output should be ignored by Git.
+- The current changes should be grouped into separate attachment-workflow, observability, and documentation commits.
+- The JWT signing secret is generated with `openssl rand -base64 32` and stored as `CLIENT_FILES_JWT_SECRET_BASE64`.
+- Estimater will store structured estimate data in PostgreSQL and generate a PDF snapshot stored in S3 and linked into Client Files.
+- Google Docs and Word files are not required as the canonical estimate artifact.
+- Estimate revisions create new PDF versions rather than overwriting previously generated client-facing documents.
+
+### Work Completed
+
+- Established the DataGrip connection path to Railway PostgreSQL using the public TCP proxy.
+- Reached the Railway database and attempted to execute the reviewed schema script.
+- Diagnosed the `unterminated dollar-quoted string` error as DataGrip sending only part of a PL/pgSQL function rather than a missing closing delimiter in the SQL file.
+- Defined the correct DataGrip execution approach for complete scripts and dollar-quoted blocks.
+- Prepared the SQL needed to add `gen_random_uuid()` as the default for `tenants.id`.
+- Prepared a tenant insert that omits generated fields and returns the created tenant UUID and timestamp.
+- Defined a three-commit Git plan for attachment functionality, backend observability, and development documentation.
+- Added `logs/` to the intended `.gitignore` changes so generated log files are not committed.
+- Confirmed the OpenSSL command for generating the Base64 JWT secret.
+- Finalized PDF as the stored estimate-document format and confirmed the structured-data-plus-PDF architecture for Estimater integration.
+
+### Testing Confirmed
+
+- DataGrip can reach and execute SQL against the Railway PostgreSQL service.
+- PostgreSQL returned a parser error from the submitted migration fragment, confirming that the failure occurred during script execution rather than connection setup.
+
+### Unresolved Questions
+
+- Has the complete schema script been rerun successfully through DataGrip's full-script execution action?
+- Do the verification queries confirm both PL/pgSQL functions, their triggers, all required tables, constraints, and indexes?
+- Has the `tenants.id` default been applied in Railway?
+- Has the production tenant row been inserted successfully?
+- Has the generated tenant UUID been stored as `CLIENT_FILES_TENANT_ID` in Railway?
+- Has the production Base64 JWT secret been generated and stored as `CLIENT_FILES_JWT_SECRET_BASE64`?
+- Were the planned Git commits created and pushed to `origin/main`?
+- Has the full Maven test suite passed after the backend changes were consolidated?
+- Which PDF-generation library or service will Estimater use?
+- What exact estimate tables, status values, line-item model, and revision fields will be implemented first?
+
+### Next Steps
+
+1. Run the complete Railway schema script using DataGrip's **Run SQL Script** action.
+2. Run post-migration verification for tables, columns, constraints, indexes, functions, and triggers.
+3. Apply the UUID default to `tenants.id` if it was not included in the executed bootstrap script.
+4. Insert the production tenant and capture the UUID returned by PostgreSQL.
+5. Set `CLIENT_FILES_TENANT_ID` and `CLIENT_FILES_JWT_SECRET_BASE64` in Railway.
+6. Create and review the planned Git commits, confirm `logs/` is ignored, and push the branch.
+7. Run the complete Maven test suite.
+8. Deploy the backend to Railway and verify startup against the Railway database.
+9. Replace the local tunnel URL in Base44 with the Railway backend URL.
+10. Configure final production API and S3 CORS origins.
+11. Perform a production login, contact, upload, assignment, deletion, restoration, and download smoke test.
+12. Design the initial structured estimate schema and implement server-side PDF generation for the Estimater-to-Client Files workflow.
+
+### Session End State
+
+Local administrative access to Railway PostgreSQL is established through DataGrip. The initial schema execution reached PostgreSQL but was interrupted because DataGrip split a dollar-quoted PL/pgSQL function; the correct full-script execution method is now documented. The production tenant defaults, seed, Railway environment values, Git commits, backend deployment, and production smoke test still require confirmation. The estimate integration direction is now explicit: structured PostgreSQL records plus versioned PDF snapshots in Client Files.
+
