@@ -30,7 +30,7 @@ storage:
     upload-url-ttl: ${CLIENT_FILES_UPLOAD_URL_TTL:15m}
     download-url-ttl: ${CLIENT_FILES_DOWNLOAD_URL_TTL:5m}
     max-file-size: ${CLIENT_FILES_MAX_FILE_SIZE:500MB}
-    allowed-content-types: image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,video/mp4,video/quicktime
+    allowed-content-types: image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,video/mp4,video/quicktime,text/plain
 
 client-files:
   auth:
