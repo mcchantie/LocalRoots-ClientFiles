@@ -592,3 +592,111 @@ Connect DataGrip to the Railway production PostgreSQL service, begin the reviewe
 
 Local administrative access to Railway PostgreSQL is established through DataGrip. The initial schema execution reached PostgreSQL but was interrupted because DataGrip split a dollar-quoted PL/pgSQL function; the correct full-script execution method is now documented. The production tenant defaults, seed, Railway environment values, Git commits, backend deployment, and production smoke test still require confirmation. The estimate integration direction is now explicit: structured PostgreSQL records plus versioned PDF snapshots in Client Files.
 
+---
+
+## Session: July 16, 2026
+
+### Session Goal
+
+Design and prepare the Client Files and Estimater integration for saving generated estimates, improve multi-file upload and file-browser usability, change the saved estimate artifact from PDF to UTF-8 plain text, and store front and back lawn measurements as structured estimate data.
+
+### Questions Discussed
+
+- Where should the **Save to Client Files** button appear in the Estimater customer-messaging interface?
+- Should an estimate be saved under an existing contact, a newly created contact, or Unassigned?
+- How should Estimater create a contact without forcing a first or last name?
+- Should saved estimates be PDFs, `.txt` files, or another document type?
+- How can bullet points, em dashes, tildes, spaces, and line breaks remain readable in stored estimates?
+- How should Client Files display a plain-text estimate without showing malformed characters such as `â€¢` or `â€”`?
+- Should a user be able to upload files directly while viewing a contact?
+- How should one multi-file upload batch be divided between several contacts or categories?
+- How should bulk defaults and individual file overrides interact?
+- Should image files show a preview before they are uploaded?
+- What grid, list, search, filter, and sorting controls should the file viewer provide?
+- Should file search and sorting happen in Base44 or through paginated backend queries?
+- What metadata should identify an estimate attachment as originating from Estimater?
+- Should the structured estimate record store front and back lawn measurements separately?
+- What migration is required for the new estimate measurement columns?
+
+### Design Decisions
+
+- Add **Save to Client Files** below the generated-estimate text area and above the **Copy for Text** and **Reset** row.
+- Estimater can save an estimate to an existing contact, create a new contact during the save flow, or leave the estimate Unassigned.
+- New contacts may have no name but must have a usable phone number or email address.
+- Keep the structured estimate record as the source of truth.
+- Save the client-facing estimate snapshot as a versioned UTF-8 `.txt` file rather than a PDF.
+- Use `text/plain; charset=UTF-8`, category `ESTIMATES`, file kind `DOCUMENT`, source `ESTIMATOR`, and the related estimate UUID.
+- Preserve bullets, em dashes, tildes, curly punctuation, indentation, spaces, and line breaks end to end.
+- View text estimates through an authenticated literal-text endpoint and render them with `white-space: pre-wrap`.
+- Do not use Base64, Latin-1, Markdown rendering, HTML conversion, or `innerHTML` for estimate text.
+- Allow uploading directly from a contact page with that contact preselected.
+- Add checkboxes and subset-based bulk actions so different portions of one batch can be assigned to different contacts and categories.
+- Keep per-file overrides when later batch defaults change.
+- Require a category for each file while continuing to allow an Unassigned contact.
+- Show local image thumbnails in the upload queue and file-type icons for non-images.
+- Add grid and list views, filename search, category/status filters, sorting by name and time, and paginated server-side browsing.
+- Add `front_sqft`, `back_sqft`, and `total_sqft` to the structured estimate model.
+- Existing estimates may leave front and back measurements null when the historical split is unknown.
+
+### Work Completed
+
+- Reviewed the current Client Files contact-detail, upload, file-card, and Estimater customer-messaging screens.
+- Defined the contact-specific upload experience and placement of the new Estimater save action.
+- Defined the three save destinations: existing contact, new contact, and Unassigned.
+- Defined a multi-file selection workflow with subset-based client and category assignment.
+- Defined upload queue previews, bulk defaults, per-file overrides, verification summaries, and validation behavior.
+- Defined grid and list file views with search, filters, sorting, pagination, and file-type previews.
+- Prepared Client Files backend updates for file search, sorting, filtering, batch assignment, Estimater-origin attachments, and text-file handling.
+- Prepared Estimater backend updates for structured estimate records and direct saving into Client Files.
+- Replaced the initial PDF-generation direction with UTF-8 plain-text `.txt` generation.
+- Added UTF-8 validation and a tenant-authorized text-content endpoint to the prepared Client Files backend.
+- Defined the Base44 text viewer to decode UTF-8 and render literal prewrapped text.
+- Updated the prepared Base44 prompts for both Client Files and Estimater.
+- Added separate front, back, and total lawn-area fields to the prepared Estimater estimate model.
+- Prepared a PostgreSQL script that adds `front_sqft` and `back_sqft` when needed.
+- Generated sample plain-text estimate files for UTF-8 formatting checks.
+- Compiled the prepared main Java sources with Java 17 compatibility; full Maven test and end-to-end deployment verification remain outstanding.
+
+### Testing Confirmed
+
+- The prepared plain-text sample contains readable bullets, em dashes, tildes, spacing, and line breaks when interpreted as UTF-8.
+- The prepared Java source changes compile with Java 17 compatibility in the available environment.
+
+### Unresolved Questions
+
+- Have the latest Client Files and Estimater backend changes been merged into the active repositories rather than remaining only in generated update archives?
+- Have both Base44 prompts been applied to the current frontend applications?
+- Has the Estimater-to-Client Files save flow been tested end to end against the development S3 bucket and database?
+- Has the new `ESTIMATOR` source-system value and any supporting constraint change been applied to every target database?
+- Has the `estimates` table been created or updated in the intended Estimater database?
+- Have `front_sqft` and `back_sqft` been added and verified in development and production?
+- Does the saved attachment reliably retain the estimate UUID and contact assignment across existing, new, and Unassigned flows?
+- How will duplicate save clicks be prevented: estimate UUID, revision number, or an explicit idempotency key?
+- What exact revision and status fields should be added before estimates are edited and resent?
+- Has the authenticated text-content endpoint been tested with valid UTF-8, an optional byte-order mark, and invalidly encoded text?
+- Does copied text preserve its spacing and punctuation when pasted into Quo on desktop and mobile?
+- Have batch subset assignment, shift-range selection, per-file overrides, and mixed-client uploads been tested with real files?
+- Have grid/list preference persistence and server-side file searching been tested with a larger attachment set?
+- Should the default plain-text size limit remain 5 MB?
+- Should existing PDF estimate experiments be deleted, retained as test artifacts, or ignored because no production estimates were saved in that format?
+
+### Next Steps
+
+1. Merge the latest Client Files UTF-8 and file-browser changes into the active Client Files repository.
+2. Merge the latest Estimater text-save and front/back measurement changes into the active Estimater repository.
+3. Review the generated diffs and remove any superseded PDF-generation code.
+4. Run the complete Maven test suites for both backends.
+5. Apply the required Client Files source-system/index SQL to the development database and verify the constraints.
+6. Apply or verify the Estimater `estimates` table and front/back measurement columns.
+7. Configure `CLIENT_FILES_API_BASE_URL` for the Estimater backend.
+8. Apply the updated Base44 prompt to Client Files and verify contact-specific upload, thumbnails, subset assignment, search, sorting, and grid/list views.
+9. Apply the updated Base44 prompt to Estimater and verify the Save to Client Files button placement.
+10. Test saving to an existing contact, a newly created phone-only contact, a newly created email-only contact, and Unassigned.
+11. Open and copy saved `.txt` estimates in Client Files and paste them into Quo to verify exact UTF-8 formatting.
+12. Test duplicate clicks and implement idempotent estimate-revision saving before production use.
+13. Deploy the verified backends and complete a production smoke test using non-client test records.
+
+### Session End State
+
+The desired Client Files and Estimater integration is fully specified, and updated backend packages, SQL, UTF-8 samples, and Base44 implementation prompts have been prepared. The current canonical estimate artifact is now a UTF-8 plain-text `.txt` file, not a PDF. The prepared structured estimate model includes separate front, back, and total lawn measurements. The next session should focus on merging these generated changes into the active repositories, running the full test suites, applying database changes, and completing end-to-end Base44, PostgreSQL, S3, Client Files, and Quo verification.
+

@@ -1,279 +1,265 @@
 # Client Files Current Development Status
 
-**Last updated:** July 14, 2026
+**Last updated:** July 16, 2026
 
 ## Current Phase
 
-Client Files is in late development integration testing and production-deployment preparation.
+Client Files is in late integration development. Its core attachment workflow is functional in development, and the current focus has expanded to:
 
-The end-to-end development upload path is working:
+- Direct Estimater-to-Client Files saving
+- UTF-8 plain-text estimate storage and viewing
+- Contact-specific uploads
+- Mixed-client and mixed-category batch uploads
+- Grid/list file browsing, search, sorting, filtering, and pagination
+- Structured front, back, and total lawn measurements
 
-```text
-Base44
-  -> Spring Boot upload initialization
-  -> browser PUT to private development S3 bucket
-  -> Spring Boot completion verification
-  -> READY attachment in PostgreSQL
-```
-
-Uploaded files can be opened through short-lived S3 URLs, and image thumbnails can be displayed in the dashboard.
-
-The current focus is completing and verifying the Railway production database bootstrap, committing and testing the consolidated backend changes, deploying the backend to Railway, and then completing the production integration smoke test.
+Updated backend packages and Base44 implementation prompts have been prepared, but they still need to be merged into the active repositories, fully tested, deployed, and verified end to end.
 
 ## Current Architecture
 
 ```text
-Base44 dashboard
+Base44 Client Files dashboard
         |
         | HTTPS JSON API with JWT bearer token
         v
-Spring Boot backend
+Client Files Spring Boot backend
   - Local machine in development
   - Railway in production
         |
-        +---- PostgreSQL metadata and relationships
+        +---- PostgreSQL contact and attachment metadata
         |
         +---- Presigned upload, view, and download URLs
                      |
                      v
                Private Amazon S3
+
+Base44 Estimater
+        |
+        | estimate calculation and save request
+        v
+Estimater Spring Boot backend
+        |
+        +---- Structured estimate record in PostgreSQL
+        |
+        +---- UTF-8 .txt estimate artifact
+        |
+        +---- Client Files API for contact assignment and attachment storage
 ```
 
-Base44 never receives permanent AWS credentials and does not connect directly to PostgreSQL.
+Base44 never receives permanent AWS credentials and does not connect directly to PostgreSQL. Tenant and attachment authorization remain backend responsibilities.
 
 ## Environment Placement
 
 | Environment | Frontend | Backend | PostgreSQL | S3 |
 |---|---|---|---|---|
-| Development | Base44 preview | Local Spring Boot through HTTPS tunnel | Existing AWS RDS development database | Development Client Files bucket |
-| Production | Base44 production app | Railway | Railway PostgreSQL | Production Client Files bucket |
+| Development | Base44 previews | Local Spring Boot services through HTTPS tunnel or configured API URLs | Existing AWS development database(s) | Development Client Files bucket |
+| Production | Base44 production apps | Railway | Railway PostgreSQL | Production Client Files bucket |
 
 Development and production use separate databases, buckets, AWS credentials, JWT secrets, origins, tenant identifiers, and configuration.
 
-## Confirmed Working
+## Confirmed Client Files Foundation
 
-- JWT login through the local HTTPS tunnel
-- Authenticated current-user and tenant-name lookup
+- JWT login and authenticated tenant context
 - Tenant-scoped contacts
-- Phone-only and email-only contact schema rules
-- Upload initialization with the corrected JSON contract
-- Browser-to-S3 presigned `PUT`
-- S3 CORS for the Base44 development origin
-- Backend `HeadObject` completion verification
+- Phone-only and email-only contact rules
+- Shared `tenants`, `contacts`, and `contact_attachments` tables
+- Direct browser-to-S3 upload initialization, presigned `PUT`, and completion verification
 - READY attachment creation
-- Temporary Open/view URLs
-- Actual image thumbnail display
+- Temporary Open/view and Download URLs
+- Image thumbnails in the file gallery
 - Contact detail pages
-- All Files and Unassigned attachment retrieval when frontend-only `ALL` filter values are omitted
-- Shared `tenants`, `contacts`, and `contact_attachments` schema
-- Soft-delete and restore backend operations
-- External Railway PostgreSQL access from DataGrip through the public TCP proxy
-- SQL execution reaches the Railway PostgreSQL server
+- All Files, Unassigned, and Deleted file views
+- Assignment, reassignment, and unassignment support
+- Soft deletion and restoration
+- Safe download filenames with preserved extensions
+- Correlation-aware backend logging
+- External Railway PostgreSQL administration through the public TCP proxy
 
-## Backend Updates Prepared During July 13
+## Canonical Estimate Storage
 
-The backend updates produced during testing include:
+Estimater saves two connected representations:
 
-- `GET /api/v1/contacts/{contactId}/attachments`
-- Safe tenant validation for contact-scoped file lists
-- `PATCH /api/v1/attachments/{attachmentId}` for assign, reassign, and unassign
-- Proper `405 Method Not Allowed` handling
-- Safe download filename generation and `Content-Disposition`
-- `deletedOnly=true` list filtering
-- Correlation-aware request and operation logging
-- S3, database, validation, assignment, deletion, and restoration diagnostics
-- Optional detailed debug logging profile
+1. A structured PostgreSQL estimate record as the source of truth.
+2. A versioned UTF-8 plain-text `.txt` file in Client Files as the client-facing and copyable snapshot.
 
-These changes should be consolidated into the active backend branch and verified together before deployment.
+The previous PDF direction is superseded.
 
-## Upload Contract
+### Estimate Attachment Values
 
-The initialization request uses:
+- Content type: `text/plain; charset=UTF-8`
+- Extension: `.txt`
+- Category: `ESTIMATES`
+- File kind: `DOCUMENT`
+- Source: `ESTIMATOR`
+- Related estimate UUID
+- Existing, newly created, or null contact assignment
+- READY status after successful storage and verification
 
-- `originalFileName`
-- `contentType`
-- Positive numeric `sizeBytes`
-- Backend category enum
-- Selected contact UUID or `null`
+### Formatting Requirements
 
-The frontend then uploads the original JavaScript `File` to the presigned S3 URL and calls the completion endpoint.
+The generated file and UI must preserve:
 
-Backend headers such as `Authorization` and `ngrok-skip-browser-warning` must never be sent to S3.
+- `•` bullets
+- `—` em dashes
+- `~` tildes
+- Curly punctuation and accented characters
+- Indentation, spaces, and line breaks
 
-## Attachment Category Labels
+Text must be encoded and decoded as UTF-8. It must not be processed as Latin-1, Base64, Markdown, or HTML.
 
-| Backend value | Base44 label |
-|---|---|
-| `ESTIMATES` | Estimates |
-| `LANDGLIDE` | LandGlide Photos |
-| `PROPERTY_PHOTOS` | Photos |
-| `VIDEOS` | Videos |
-| `DOCUMENTS` | Documents |
-| `OTHER` | Other |
+## Plain-Text Viewing
 
-The backend enums remain unchanged.
-
-## Download Behavior
-
-The backend should control the download filename.
-
-Example:
-
-```text
-Display name: bob's lawn
-Original filename: local_roots_logo_facebook_cover.png
-Download name: bobs_lawn.png
-```
-
-Open uses a temporary URL with `download=false`. Download uses `download=true`.
-
-## Contact Assignment Rules
-
-- Empty client search with no selected contact permits an unassigned upload.
-- Typed text does not equal a selected contact.
-- Unmatched non-empty text blocks upload and prompts the user to select or create a client.
-- A new contact requires a phone number or email address.
-- Name fields remain optional.
-- Assignment and unassignment use PATCH with a contact UUID or `null`.
-
-## Deleted Files Semantics
-
-- No deletion parameter: active files only
-- `includeDeleted=true`: active and deleted files
-- `deletedOnly=true`: deleted files only
-
-The Deleted Files page must use:
+The prepared Client Files backend includes an authenticated endpoint:
 
 ```http
-GET /api/v1/attachments?deletedOnly=true&page=0&size=25
+GET /api/v1/attachments/{attachmentId}/text-content
 ```
 
-Deleting remains recoverable and does not physically remove the S3 object.
+The Base44 viewer should:
 
-## Base44 UI Status
+- Decode the response as UTF-8
+- Render literal text
+- Use `white-space: pre-wrap`
+- Avoid `innerHTML` and Markdown conversion
+- Copy with `navigator.clipboard.writeText()`
 
-Implemented or visible during testing:
+The default prepared maximum text-file size is 5 MB and should remain configurable.
 
-- Tenant business name in the application chrome
-- Contacts and contact search
-- Contact detail pages
-- All Files, Unassigned, and Deleted navigation
-- Attachment cards
-- Image thumbnails
-- Open and Download controls
-- Assignment menus
-- Upload dialog
-- Responsive/mobile navigation structure
+## Estimater Save Workflow
 
-Still requiring final verification or completion:
+The Estimater customer-messaging area will display **Save to Client Files** below the generated estimate and above the **Copy for Text** and **Reset** controls.
 
-- Contacts as the default root and post-login view
-- Create-new-client fields in the upload dialog
-- Client-not-found validation
-- Delete action in every active attachment dropdown
-- Restore-only behavior in Deleted Files
-- Deleted Files using `deletedOnly=true`
-- Correct contact labels on file cards
-- Mobile drawer styling after the theme-color change
-- Safe download filename after the latest backend restart
+The save flow supports:
 
-## Logging and Debugging
+- Existing contact search by name, phone number, or email
+- New contact creation without requiring a name
+- Unassigned saving
 
-The updated backend logging design includes:
+A new contact must contain a usable phone number or email address. The returned contact UUID is used when creating the estimate attachment.
 
-- Correlation IDs
-- Tenant and authenticated-user context
-- Request method, path, status, and duration
-- Upload, S3 verification, completion, assignment, deletion, and restore events
-- Structured error categories
-- Rotating local logs
-- Optional `local,debug` profile
+## Structured Estimate Fields
 
-Logs must not include JWTs, AWS secrets, complete presigned URLs, passwords, or raw contact identifiers.
+The prepared estimate model stores:
 
-A separate warning was observed from Hikari validating closed PostgreSQL connections. This did not cause the unsupported PATCH failure, but connection-pool lifetime settings should be reviewed if the warning continues.
+- `front_sqft`
+- `back_sqft`
+- `total_sqft`
 
-## Railway Database Preparation
+New estimates populate the front and back values when supplied. Historical records may leave the split null. The total records the area used for pricing.
 
-A Railway PostgreSQL setup bundle has been prepared with:
+## Upload Experience Target
 
-- Preflight checks
-- Schema creation
-- Production tenant seed
-- Post-setup verification
-- Transactional smoke test and cleanup
+### Contact-Specific Uploads
 
-Use one creation path:
+- Upload files directly from a contact-detail page
+- Preselect the current contact
+- Allow explicit reassignment or Unassigned status
 
-- Production Flyway, followed by tenant seed and verification; or
-- Manual schema script with Flyway disabled
+### Mixed Batch Assignment
 
-Do not run both schema-creation paths.
+- Select multiple files with checkboxes
+- Select all, individual files, or ranges
+- Apply a contact or category to only the selected subset
+- Assign different subsets to different contacts and categories
+- Retain per-file overrides when defaults change
+- Require a category for each file
 
-### Current Railway Database State
+### Queue Previews
 
-- DataGrip can connect from the local Mac through Railway's public TCP proxy using SSL.
-- The reviewed schema script was attempted against Railway PostgreSQL.
-- Execution stopped inside the first PL/pgSQL function with an `unterminated dollar-quoted string` error because DataGrip submitted only part of the dollar-quoted block.
-- The SQL file contains the closing delimiter; the fix is to use **SQL Scripts → Run SQL Script…** or execute the entire selected function or `DO` block.
-- The Railway migration must not be treated as complete until the verification queries pass.
+- Local thumbnails for images before upload
+- File-type icons for text, PDF, document, video, and unknown files
+- Filename, size, client, category, display name, and upload status
 
-### Production Tenant Bootstrap
+## File Browser Target
 
-The `tenants` table should generate its UUID and timestamp in PostgreSQL:
+Client Files will support:
 
-```sql
-ALTER TABLE tenants
-ALTER COLUMN id SET DEFAULT gen_random_uuid();
-```
+- Grid/icon view
+- List view
+- Search by display name and original filename
+- Category and status filters
+- File-kind filtering where useful
+- Sort by name, created/uploaded time, updated time, and size
+- Server-side pagination, search, filtering, and sorting
+- Persistent view preference
 
-Normal production tenant insertion omits `id` and `created_at`, uses `RETURNING`, and saves the returned UUID as:
+On a contact page, the list view may omit the client column because the contact context is already known.
 
-```text
-CLIENT_FILES_TENANT_ID
-```
+## Prepared Backend and Database Changes
 
-The production JWT signing key is generated separately with:
+### Client Files
 
-```bash
-openssl rand -base64 32
-```
+- File search and sorting support
+- File-kind filtering
+- Batch assignment and categorization support
+- `ESTIMATOR` attachment source support
+- UTF-8 plain-text validation
+- Authenticated text-content endpoint
+- Correct `.txt` download behavior
+- Indexes supporting file browsing
 
-and stored as:
+### Estimater
 
-```text
-CLIENT_FILES_JWT_SECRET_BASE64
-```
+- Structured `estimates` records
+- Existing-contact, new-contact, and Unassigned save flows
+- UTF-8 `.txt` generation
+- Client Files upload integration
+- Front, back, and total lawn measurements
+- Estimate UUID attachment metadata
 
-A new schema-only `pg_dump` is needed only if the AWS development schema changed after the last verified dump. A full development data dump should not be copied into Railway by default.
+### SQL Requiring Review or Application
 
+- Client Files source-system and file-browser index changes
+- Estimater `estimates` table creation when not already present
+- `front_sqft` and `back_sqft` column additions
 
-## Estimater Integration Decision
+The Estimater production profile may currently use Hibernate schema updates, but explicit reviewed migrations remain preferable for controlled production changes.
 
-Estimater will not use Google Docs or Word files as the canonical saved estimate. It will save:
+## Base44 Work Prepared
 
-1. Structured estimate and line-item data in PostgreSQL as the editable source of truth.
-2. A generated, versioned PDF in S3 with a linked Client Files attachment record.
+Two implementation prompts have been prepared:
 
-The PDF attachment will use `application/pdf`, category `ESTIMATES`, file kind `DOCUMENT`, the selected contact, and the related estimate ID. Revisions create new PDF snapshots rather than replacing an estimate that may already have been sent.
+- Client Files upload and file-browser update
+- Estimater Save to Client Files update
+
+They cover contact-specific uploads, subset assignment, image previews, grid/list views, search, sorting, UTF-8 text viewing, and the Estimater save modal.
+
+These prompts still need to be applied and verified against the current Base44 applications.
+
+## Current Verification Status
+
+Confirmed in the preparation environment:
+
+- UTF-8 sample estimate displays readable bullets, em dashes, tildes, and line breaks
+- Prepared main Java sources compile with Java 17 compatibility
+
+Still unconfirmed:
+
+- Full Maven test suites
+- Active-repository merge quality
+- Database migration success
+- End-to-end save through Estimater, Client Files, PostgreSQL, and S3
+- Copy and paste from Client Files into Quo
+- Mixed-client and mixed-category upload behavior
+- File browser performance with a larger collection
+- Idempotent duplicate-save protection
+- Production deployment and smoke testing
 
 ## Immediate Next Steps
 
-1. Rerun the complete Railway schema script through DataGrip using **Run SQL Script**.
-2. Verify the Railway tables, columns, constraints, indexes, functions, and triggers.
-3. Apply the database-generated UUID default to `tenants.id` if needed.
-4. Insert the production tenant and capture the generated UUID.
-5. Set `CLIENT_FILES_TENANT_ID` and `CLIENT_FILES_JWT_SECRET_BASE64` in Railway.
-6. Create the attachment, observability, and documentation Git commits; verify `logs/` is ignored; push to `origin/main`.
-7. Run the full Maven test suite.
-8. Retest assignment, reassignment, unassignment, delete, restore, and safe download filenames.
-9. Complete and test upload-time new-client creation.
-10. Verify Contacts as the default view, tenant name placement, and the mobile navigation drawer.
-11. Deploy the backend to Railway and verify startup against Railway PostgreSQL.
-12. Replace the ngrok API URL in Base44 with the Railway backend URL.
-13. Configure final production Base44 and S3 CORS origins.
-14. Perform a production login, contact, upload, open, download, assignment, deletion, and restoration smoke test.
-15. Design the initial structured estimate tables and implement PDF generation for direct Estimater-to-Client Files saving.
+1. Merge the latest prepared Client Files changes into the active Client Files repository.
+2. Merge the latest prepared Estimater changes into the active Estimater repository.
+3. Review the diffs and remove superseded PDF-generation code and documentation.
+4. Run both full Maven test suites.
+5. Apply and verify Client Files database constraints and indexes.
+6. Apply and verify the Estimater estimate table and front/back measurement columns.
+7. Configure `CLIENT_FILES_API_BASE_URL` for Estimater.
+8. Apply the Client Files Base44 prompt and test contact-specific and mixed-batch uploads.
+9. Apply the Estimater Base44 prompt and verify button placement and all three save destinations.
+10. Test saved estimate text with bullets, em dashes, tildes, spacing, and line breaks.
+11. Paste the copied estimate into Quo and verify formatting on desktop and mobile.
+12. Add or verify estimate revisioning and duplicate-save idempotency.
+13. Deploy verified changes and run a production smoke test with non-client test records.
 
 ## Deferred Work
 
@@ -282,8 +268,8 @@ The PDF attachment will use `application/pdf`, category `ESTIMATES`, file kind `
 - Multipart and resumable video uploads
 - Automated abandoned-upload cleanup
 - Malware and file-signature inspection
-- Thumbnail generation service
+- Automated thumbnail-generation service
 - LandGlide crop processing
 - Physical S3 purge after retention
-- Implementation of estimate PDF generation and structured Estimater records
+- Advanced estimate revision approval workflow
 - Production monitoring, audit reporting, and backup-restore drills
