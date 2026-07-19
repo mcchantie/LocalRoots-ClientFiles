@@ -130,9 +130,18 @@ GET /api/v1/attachments?unassigned=true
 GET /api/v1/attachments?category=PROPERTY_PHOTOS
 GET /api/v1/attachments?status=READY
 GET /api/v1/attachments?includeDeleted=true
+GET /api/v1/attachments?search=lawn&sortBy=NAME&sortDirection=ASC
+GET /api/v1/attachments?fileKind=IMAGE&sortBy=CREATED_AT&sortDirection=DESC
 ```
 
 Filters may be combined. When `contactId` is present it takes precedence over `unassigned=true`.
+
+Additional file-browser parameters:
+
+- `search`: display name, original filename, content type, source system, or description
+- `fileKind`: `IMAGE`, `VIDEO`, `DOCUMENT`, or `OTHER`
+- `sortBy`: `NAME`, `CREATED_AT`, `UPDATED_AT`, or `SIZE`
+- `sortDirection`: `ASC` or `DESC`
 
 ### Initialize an upload
 
@@ -220,6 +229,24 @@ Return to Unassigned:
   "contactId": null
 }
 ```
+
+
+### Batch assign and categorize existing attachments
+
+```http
+POST /api/v1/attachments/batch-update
+```
+
+```json
+{
+  "attachmentIds": ["attachment-uuid-1", "attachment-uuid-2"],
+  "updateContact": true,
+  "contactId": "contact-uuid-or-null",
+  "category": "PROPERTY_PHOTOS"
+}
+```
+
+Set `updateContact` to `true` with `contactId: null` to move the selected attachments to Unassigned. Set `updateContact` to `false` when changing only the category.
 
 ### Soft delete and restore
 
