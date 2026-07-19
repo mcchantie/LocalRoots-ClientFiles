@@ -10,7 +10,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.unit.DataSize;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
+import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
@@ -43,6 +45,7 @@ public class S3StorageService {
 
     private final String bucket;
     private final DataSize maxFileSize;
+    private final DataSize maxTextFileSize;
     private final Duration uploadUrlTtl;
     private final Duration downloadUrlTtl;
     private final Set<String> allowedContentTypes;
@@ -52,6 +55,7 @@ public class S3StorageService {
             S3Presigner s3Presigner,
             @Value("${storage.s3.bucket}") String bucket,
             @Value("${storage.s3.max-file-size:100MB}") DataSize maxFileSize,
+            @Value("${storage.s3.max-text-file-size:5MB}") DataSize maxTextFileSize,
             @Value("${storage.s3.upload-url-ttl:15m}") Duration uploadUrlTtl,
             @Value("${storage.s3.download-url-ttl:15m}") Duration downloadUrlTtl,
             @Value("${storage.s3.allowed-content-types}") String allowedContentTypes
@@ -60,6 +64,7 @@ public class S3StorageService {
         this.s3Presigner = s3Presigner;
         this.bucket = requireValue(bucket, "storage.s3.bucket");
         this.maxFileSize = maxFileSize;
+        this.maxTextFileSize = maxTextFileSize;
         this.uploadUrlTtl = uploadUrlTtl;
         this.downloadUrlTtl = downloadUrlTtl;
 
@@ -75,6 +80,10 @@ public class S3StorageService {
 
     public long maxFileSizeBytes() {
         return maxFileSize.toBytes();
+    }
+
+    public long maxTextFileSizeBytes() {
+        return maxTextFileSize.toBytes();
     }
 
     public Duration uploadUrlTtl() {
@@ -133,7 +142,7 @@ public class S3StorageService {
                 "Creating presigned S3 upload bucket={} key={} contentType={} checksumRequired={} ttl={}",
                 bucket,
                 key,
-                normalizeContentType(contentType),
+                canonicalContentType(contentType),
                 checksumSha256Base64 != null && !checksumSha256Base64.isBlank(),
                 uploadUrlTtl
         );
@@ -141,7 +150,7 @@ public class S3StorageService {
         PutObjectRequest.Builder putObjectRequest = PutObjectRequest.builder()
                 .bucket(bucket)
                 .key(key)
-                .contentType(normalizeContentType(contentType));
+                .contentType(canonicalContentType(contentType));
 
         if (checksumSha256Base64 != null
                 && !checksumSha256Base64.isBlank()) {
@@ -211,7 +220,7 @@ public class S3StorageService {
 
             UploadedObject uploadedObject = new UploadedObject(
                     response.contentLength(),
-                    normalizeContentType(response.contentType()),
+                    canonicalContentType(response.contentType()),
                     trimQuotes(response.eTag()),
                     response.checksumSHA256()
             );
@@ -244,6 +253,7 @@ public class S3StorageService {
     public PresignedDownload presignDownload(
             String key,
             String fileName,
+            String contentType,
             boolean download
     ) {
         log.debug(
@@ -263,6 +273,7 @@ public class S3StorageService {
                 .bucket(bucket)
                 .key(key)
                 .responseContentDisposition(disposition)
+                .responseContentType(canonicalContentType(contentType))
                 .build();
 
         PresignedGetObjectRequest presigned =
@@ -287,6 +298,27 @@ public class S3StorageService {
         );
     }
 
+    public byte[] readObject(String key) {
+        log.debug("Reading S3 object bucket={} key={}", bucket, key);
+        GetObjectRequest request = GetObjectRequest.builder()
+                .bucket(bucket)
+                .key(key)
+                .build();
+        try {
+            ResponseBytes<GetObjectResponse> response = s3Client.getObjectAsBytes(request);
+            return response.asByteArray();
+        } catch (software.amazon.awssdk.services.s3.model.S3Exception exception) {
+            if (exception.statusCode() == 404) {
+                throw new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "File content was not found",
+                        "The attachment metadata exists, but the stored S3 object is missing."
+                );
+            }
+            throw exception;
+        }
+    }
+
     public void assertKeyBelongsToTenant(
             String key,
             UUID tenantId
@@ -299,6 +331,14 @@ public class S3StorageService {
                     "Stored S3 key does not match the attachment tenant."
             );
         }
+    }
+
+    public String canonicalContentType(String contentType) {
+        String normalized = normalizeContentType(contentType);
+        if (normalized.equals("text/plain")) {
+            return "text/plain; charset=utf-8";
+        }
+        return normalized;
     }
 
     public String normalizeContentType(String contentType) {

@@ -1,9 +1,12 @@
 package com.localroots.clientfiles.api;
 
 import com.localroots.clientfiles.attachment.AttachmentService;
+import com.localroots.clientfiles.attachment.AttachmentSortField;
 import com.localroots.clientfiles.security.RequestTenantResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PatchMapping;
 
 import java.lang.reflect.Method;
@@ -102,11 +105,15 @@ class AttachmentControllerTest {
         when(attachmentService.list(
                 tenantId,
                 null,
+                "estimate",
+                null,
                 null,
                 null,
                 false,
                 false,
                 true,
+                AttachmentSortField.NAME,
+                Sort.Direction.ASC,
                 0,
                 25
         )).thenReturn(expected);
@@ -114,11 +121,15 @@ class AttachmentControllerTest {
         PageResponse<AttachmentResponse> actual = controller.listAttachments(
                 request,
                 null,
+                "estimate",
+                null,
                 null,
                 null,
                 false,
                 false,
                 true,
+                AttachmentSortField.NAME,
+                Sort.Direction.ASC,
                 0,
                 25
         );
@@ -127,14 +138,38 @@ class AttachmentControllerTest {
         verify(attachmentService).list(
                 tenantId,
                 null,
+                "estimate",
+                null,
                 null,
                 null,
                 false,
                 false,
                 true,
+                AttachmentSortField.NAME,
+                Sort.Direction.ASC,
                 0,
                 25
         );
+    }
+
+    @Test
+    void returnsUtf8TextContentWithExplicitCharset() {
+        AttachmentService attachmentService = mock(AttachmentService.class);
+        RequestTenantResolver tenantResolver = mock(RequestTenantResolver.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        AttachmentController controller = new AttachmentController(attachmentService, tenantResolver);
+        UUID tenantId = UUID.randomUUID();
+        UUID attachmentId = UUID.randomUUID();
+        byte[] expected = "• Estimate — ~5,420 sq ft".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        when(tenantResolver.requireTenantId(request)).thenReturn(tenantId);
+        when(attachmentService.readTextContent(tenantId, attachmentId)).thenReturn(expected);
+
+        ResponseEntity<byte[]> response = controller.getTextContent(request, attachmentId);
+
+        assertArrayEquals(expected, response.getBody());
+        assertTrue(response.getHeaders().getContentType().toString().toLowerCase().contains("charset=utf-8"));
+        verify(attachmentService).readTextContent(tenantId, attachmentId);
     }
 
 }

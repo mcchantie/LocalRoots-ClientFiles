@@ -119,6 +119,7 @@ class S3StorageServiceIntegrationTest {
         S3StorageService.PresignedDownload download = storageService.presignDownload(
                 uploadedKey,
                 "downloaded-test-file.pdf",
+                "pdf",
                 true
         );
 

@@ -3,13 +3,16 @@ package com.localroots.clientfiles.contact;
 import com.localroots.clientfiles.api.AttachmentResponse;
 import com.localroots.clientfiles.api.PageResponse;
 import com.localroots.clientfiles.attachment.AttachmentCategory;
+import com.localroots.clientfiles.attachment.AttachmentFileKind;
 import com.localroots.clientfiles.attachment.AttachmentService;
+import com.localroots.clientfiles.attachment.AttachmentSortField;
 import com.localroots.clientfiles.attachment.AttachmentStatus;
 import com.localroots.clientfiles.security.RequestTenantResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -68,27 +71,33 @@ public class ContactController {
     public PageResponse<AttachmentResponse> listAttachments(
             HttpServletRequest request,
             @PathVariable UUID contactId,
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) AttachmentCategory category,
+            @RequestParam(required = false) AttachmentFileKind fileKind,
             @RequestParam(required = false) AttachmentStatus status,
             @RequestParam(defaultValue = "false") boolean includeDeleted,
             @RequestParam(defaultValue = "false") boolean deletedOnly,
+            @RequestParam(defaultValue = "CREATED_AT") AttachmentSortField sortBy,
+            @RequestParam(defaultValue = "DESC") Sort.Direction sortDirection,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size
     ) {
         UUID tenantId = tenantResolver.requireTenantId(request);
 
-        // A nested contact route should return 404 when the contact does not exist
-        // for the authenticated tenant instead of silently returning an empty page.
         contactService.get(tenantId, contactId);
 
         return attachmentService.list(
                 tenantId,
                 contactId,
+                search,
                 category,
+                fileKind,
                 status,
                 false,
                 includeDeleted,
                 deletedOnly,
+                sortBy,
+                sortDirection,
                 page,
                 size
         );

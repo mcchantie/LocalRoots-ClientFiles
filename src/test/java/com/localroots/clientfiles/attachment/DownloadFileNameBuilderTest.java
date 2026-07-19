@@ -53,4 +53,17 @@ class DownloadFileNameBuilderTest {
                 )
         );
     }
+
+    @Test
+    void addsTxtExtensionForPlainTextWhenOriginalNameHasNoExtension() {
+        assertEquals(
+                "Estimate_-_Todd_Williamson.txt",
+                DownloadFileNameBuilder.build(
+                        "Estimate - Todd Williamson",
+                        "estimate",
+                        "text/plain; charset=UTF-8"
+                )
+        );
+    }
+
 }

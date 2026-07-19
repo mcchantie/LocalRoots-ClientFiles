@@ -190,6 +190,10 @@ public class AttachmentEntity {
         this.contactId = contactId;
     }
 
+    public void changeCategory(AttachmentCategory category) {
+        this.category = category;
+    }
+
     public UUID getId() { return id; }
     public UUID getTenantId() { return tenantId; }
     public UUID getContactId() { return contactId; }

@@ -13,6 +13,7 @@ final class DownloadFileNameBuilder {
             Map.entry("image/heic", "heic"),
             Map.entry("image/heif", "heif"),
             Map.entry("application/pdf", "pdf"),
+            Map.entry("text/plain", "txt"),
             Map.entry("video/mp4", "mp4"),
             Map.entry("video/quicktime", "mov")
     );

@@ -18,6 +18,11 @@ spring:
           time_zone: UTC
 
 server:
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
   port: ${PORT:8080}
   shutdown: graceful
   error:
@@ -25,17 +30,18 @@ server:
 
 storage:
   s3:
-    bucket: ${CLIENT_FILES_S3_BUCKET}
+    bucket: ${CLIENT_FILES_S3_BUCKET_PROD}
     region: ${AWS_REGION:us-east-2}
     upload-url-ttl: ${CLIENT_FILES_UPLOAD_URL_TTL:15m}
     download-url-ttl: ${CLIENT_FILES_DOWNLOAD_URL_TTL:5m}
     max-file-size: ${CLIENT_FILES_MAX_FILE_SIZE:500MB}
-    allowed-content-types: image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,video/mp4,video/quicktime,text/plain
+    max-text-file-size: ${CLIENT_FILES_MAX_TEXT_FILE_SIZE:5MB}
+    allowed-content-types: image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,text/plain,video/mp4,video/quicktime
 
 client-files:
   auth:
-    admin-username: ${CLIENT_FILES_ADMIN_USERNAME:admin}
-    admin-password: ${CLIENT_FILES_ADMIN_PASSWORD:}
+    admin-username: ${CLIENT_FILES_ADMIN_USERNAME}
+    admin-password: ${CLIENT_FILES_ADMIN_PASSWORD}
     tenant-id: ${CLIENT_FILES_TENANT_ID}
     jwt-secret-base64: ${CLIENT_FILES_JWT_SECRET_BASE64}
     jwt-issuer: ${CLIENT_FILES_JWT_ISSUER:client-files-api}

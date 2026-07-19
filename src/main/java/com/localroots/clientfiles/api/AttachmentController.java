@@ -1,19 +1,25 @@
 package com.localroots.clientfiles.api;
 
 import com.localroots.clientfiles.attachment.AttachmentCategory;
+import com.localroots.clientfiles.attachment.AttachmentFileKind;
 import com.localroots.clientfiles.attachment.AttachmentService;
+import com.localroots.clientfiles.attachment.AttachmentSortField;
 import com.localroots.clientfiles.attachment.AttachmentStatus;
 import com.localroots.clientfiles.security.RequestTenantResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -62,28 +68,63 @@ public class AttachmentController {
         return attachmentService.get(tenantResolver.requireTenantId(request), attachmentId, includeDeleted);
     }
 
+    @GetMapping(value = "/{attachmentId}/text-content", produces = "text/plain;charset=UTF-8")
+    public ResponseEntity<byte[]> getTextContent(
+            HttpServletRequest request,
+            @PathVariable UUID attachmentId
+    ) {
+        byte[] content = attachmentService.readTextContent(
+                tenantResolver.requireTenantId(request),
+                attachmentId
+        );
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/plain;charset=UTF-8"))
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .header("X-Content-Type-Options", "nosniff")
+                .body(content);
+    }
+
     @GetMapping
     public PageResponse<AttachmentResponse> listAttachments(
             HttpServletRequest request,
             @RequestParam(required = false) UUID contactId,
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) AttachmentCategory category,
+            @RequestParam(required = false) AttachmentFileKind fileKind,
             @RequestParam(required = false) AttachmentStatus status,
             @RequestParam(defaultValue = "false") boolean unassigned,
             @RequestParam(defaultValue = "false") boolean includeDeleted,
             @RequestParam(defaultValue = "false") boolean deletedOnly,
+            @RequestParam(defaultValue = "CREATED_AT") AttachmentSortField sortBy,
+            @RequestParam(defaultValue = "DESC") Sort.Direction sortDirection,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "25") @Min(1) @Max(100) int size
     ) {
         return attachmentService.list(
                 tenantResolver.requireTenantId(request),
                 contactId,
+                search,
                 category,
+                fileKind,
                 status,
                 unassigned,
                 includeDeleted,
                 deletedOnly,
+                sortBy,
+                sortDirection,
                 page,
                 size
+        );
+    }
+
+    @PostMapping("/batch-update")
+    public BatchUpdateAttachmentsResponse batchUpdate(
+            HttpServletRequest request,
+            @Valid @RequestBody BatchUpdateAttachmentsRequest body
+    ) {
+        return attachmentService.batchUpdate(
+                tenantResolver.requireTenantId(request),
+                body
         );
     }
 

@@ -4,9 +4,11 @@ import com.localroots.clientfiles.api.AttachmentResponse;
 import com.localroots.clientfiles.api.PageResponse;
 import com.localroots.clientfiles.attachment.AttachmentCategory;
 import com.localroots.clientfiles.attachment.AttachmentService;
+import com.localroots.clientfiles.attachment.AttachmentSortField;
 import com.localroots.clientfiles.attachment.AttachmentStatus;
 import com.localroots.clientfiles.security.RequestTenantResolver;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.data.domain.Sort;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -49,11 +51,15 @@ class ContactControllerTest {
         when(attachmentService.list(
                 tenantId,
                 contactId,
+                "lawn",
                 AttachmentCategory.PROPERTY_PHOTOS,
+                null,
                 AttachmentStatus.READY,
                 false,
                 true,
                 false,
+                AttachmentSortField.UPDATED_AT,
+                Sort.Direction.DESC,
                 1,
                 10
         )).thenReturn(expected);
@@ -61,10 +67,14 @@ class ContactControllerTest {
         PageResponse<AttachmentResponse> actual = controller.listAttachments(
                 request,
                 contactId,
+                "lawn",
                 AttachmentCategory.PROPERTY_PHOTOS,
+                null,
                 AttachmentStatus.READY,
                 true,
                 false,
+                AttachmentSortField.UPDATED_AT,
+                Sort.Direction.DESC,
                 1,
                 10
         );
@@ -74,11 +84,15 @@ class ContactControllerTest {
         verify(attachmentService).list(
                 tenantId,
                 contactId,
+                "lawn",
                 AttachmentCategory.PROPERTY_PHOTOS,
+                null,
                 AttachmentStatus.READY,
                 false,
                 true,
                 false,
+                AttachmentSortField.UPDATED_AT,
+                Sort.Direction.DESC,
                 1,
                 10
         );

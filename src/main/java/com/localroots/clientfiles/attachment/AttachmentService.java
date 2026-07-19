@@ -3,6 +3,8 @@ package com.localroots.clientfiles.attachment;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import com.localroots.clientfiles.api.AttachmentResponse;
+import com.localroots.clientfiles.api.BatchUpdateAttachmentsRequest;
+import com.localroots.clientfiles.api.BatchUpdateAttachmentsResponse;
 import com.localroots.clientfiles.api.DownloadUrlResponse;
 import com.localroots.clientfiles.api.InitializeUploadRequest;
 import com.localroots.clientfiles.api.InitializeUploadResponse;
@@ -22,9 +24,17 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -64,11 +74,19 @@ public class AttachmentService {
                 request.sizeBytes(),
                 request.contentType()
         );
-        validateRelatedRecords(tenantId, request.contactId(), request.estimateId(), request.parentAttachmentId());
+        String sourceSystem = normalizeSourceSystem(request.sourceSystem());
+        validateRelatedRecords(
+                tenantId,
+                request.contactId(),
+                request.estimateId(),
+                request.parentAttachmentId(),
+                sourceSystem
+        );
 
-        String contentType = storageService.normalizeContentType(request.contentType());
+        String contentType = storageService.canonicalContentType(request.contentType());
         validateContentType(contentType);
         validateFileSize(request.sizeBytes());
+        validateTextFileSize(contentType, request.sizeBytes());
 
         AttachmentFileKind fileKind = inferFileKind(contentType);
         validateCategory(request.category(), fileKind);
@@ -77,8 +95,6 @@ public class AttachmentService {
         String displayName = request.displayName() == null || request.displayName().isBlank()
                 ? request.originalFileName().trim()
                 : request.displayName().trim();
-        String sourceSystem = normalizeSourceSystem(request.sourceSystem());
-
         String metadataJson = toJson(request.metadata());
         String key = storageService.buildAttachmentKey(
                 tenantId,
@@ -178,6 +194,13 @@ public class AttachmentService {
                 uploaded.checksumSha256Base64() != null
         );
         verifyUploadedObject(entity, uploaded);
+        if (isPlainText(entity.getContentType())) {
+            try {
+                validateUtf8(storageService.readObject(entity.getS3Key()));
+            } catch (ApiException exception) {
+                failVerification(entity, exception.getMessage());
+            }
+        }
         entity.markReady(uploaded.sizeBytes(), uploaded.etag());
         log.info(
                 "Attachment upload completed attachmentId={} status={} sizeBytes={} etagPresent={}",
@@ -203,24 +226,35 @@ public class AttachmentService {
     public PageResponse<AttachmentResponse> list(
             UUID tenantId,
             UUID contactId,
+            String search,
             AttachmentCategory category,
+            AttachmentFileKind fileKind,
             AttachmentStatus status,
             boolean unassigned,
             boolean includeDeleted,
             boolean deletedOnly,
+            AttachmentSortField sortBy,
+            Sort.Direction sortDirection,
             int page,
             int size
     ) {
         int safePage = Math.max(page, 0);
         int safeSize = Math.min(Math.max(size, 1), 100);
+        AttachmentSortField safeSortBy = sortBy == null ? AttachmentSortField.CREATED_AT : sortBy;
+        Sort.Direction safeDirection = sortDirection == null ? Sort.Direction.DESC : sortDirection;
+        String searchTerm = blankToNull(search);
         log.debug(
-                "Listing attachments contactId={} category={} status={} unassigned={} includeDeleted={} deletedOnly={} page={} size={}",
+                "Listing attachments contactId={} searchPresent={} category={} fileKind={} status={} unassigned={} includeDeleted={} deletedOnly={} sortBy={} sortDirection={} page={} size={}",
                 contactId,
+                searchTerm != null,
                 category,
+                fileKind,
                 status,
                 unassigned,
                 includeDeleted,
                 deletedOnly,
+                safeSortBy,
+                safeDirection,
                 safePage,
                 safeSize
         );
@@ -231,8 +265,21 @@ public class AttachmentService {
         } else if (unassigned) {
             specification = specification.and((root, query, cb) -> cb.isNull(root.get("contactId")));
         }
+        if (searchTerm != null) {
+            String like = "%" + searchTerm.toLowerCase(Locale.ROOT) + "%";
+            specification = specification.and((root, query, cb) -> cb.or(
+                    cb.like(cb.lower(root.get("displayName")), like),
+                    cb.like(cb.lower(root.get("originalFileName")), like),
+                    cb.like(cb.lower(root.get("contentType")), like),
+                    cb.like(cb.lower(root.get("sourceSystem")), like),
+                    cb.like(cb.lower(cb.coalesce(root.get("description"), "")), like)
+            ));
+        }
         if (category != null) {
             specification = specification.and((root, query, cb) -> cb.equal(root.get("category"), category));
+        }
+        if (fileKind != null) {
+            specification = specification.and((root, query, cb) -> cb.equal(root.get("fileKind"), fileKind));
         }
         if (status != null) {
             specification = specification.and((root, query, cb) -> cb.equal(root.get("status"), status));
@@ -243,14 +290,17 @@ public class AttachmentService {
             specification = specification.and((root, query, cb) -> cb.isNull(root.get("deletedAt")));
         }
 
+        Sort sort = Sort.by(safeDirection, safeSortBy.property())
+                .and(Sort.by(Sort.Direction.ASC, "id"));
         Page<AttachmentResponse> responsePage = repository.findAll(
                         specification,
-                        PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"))
+                        PageRequest.of(safePage, safeSize, sort)
                 )
                 .map(entity -> AttachmentResponse.from(entity, objectMapper));
         log.info(
-                "Attachments listed contactId={} unassigned={} includeDeleted={} deletedOnly={} returned={} total={} page={} totalPages={}",
+                "Attachments listed contactId={} searchPresent={} unassigned={} includeDeleted={} deletedOnly={} returned={} total={} page={} totalPages={}",
                 contactId,
+                searchTerm != null,
                 unassigned,
                 includeDeleted,
                 deletedOnly,
@@ -285,6 +335,7 @@ public class AttachmentService {
         S3StorageService.PresignedDownload presigned = storageService.presignDownload(
                 entity.getS3Key(),
                 downloadFileName,
+                entity.getContentType(),
                 download
         );
         log.info(
@@ -295,6 +346,38 @@ public class AttachmentService {
                 presigned.expiresAt()
         );
         return new DownloadUrlResponse(entity.getId(), presigned.url(), presigned.expiresAt());
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] readTextContent(UUID tenantId, UUID attachmentId) {
+        log.info("Reading UTF-8 text attachment attachmentId={}", attachmentId);
+        AttachmentEntity entity = requireAttachment(tenantId, attachmentId);
+        requireNotDeleted(entity);
+
+        if (entity.getStatus() != AttachmentStatus.READY && entity.getStatus() != AttachmentStatus.UPLOADED) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "File is not ready",
+                    "Text content is only available after the upload has been verified."
+            );
+        }
+        if (!isPlainText(entity.getContentType())) {
+            throw new ApiException(
+                    HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                    "File is not plain text",
+                    "Only UTF-8 text/plain attachments can be opened in the text viewer."
+            );
+        }
+
+        long sizeBytes = entity.getActualSizeBytes() == null
+                ? entity.getDeclaredSizeBytes()
+                : entity.getActualSizeBytes();
+        validateTextFileSize(entity.getContentType(), sizeBytes);
+        assertStorageLocation(entity, tenantId);
+
+        byte[] bytes = storageService.readObject(entity.getS3Key());
+        validateUtf8(bytes);
+        return stripUtf8Bom(bytes);
     }
 
     @Transactional
@@ -326,7 +409,7 @@ public class AttachmentService {
                 previousContactId,
                 contactId
         );
-        validateRelatedRecords(tenantId, contactId, null, null);
+        validateRelatedRecords(tenantId, contactId, null, null, "MANUAL");
         entity.assignContact(contactId);
         log.info(
                 "Attachment assignment changed attachmentId={} previousContactId={} contactId={} action={}",
@@ -336,6 +419,58 @@ public class AttachmentService {
                 contactId == null ? "UNASSIGN" : previousContactId == null ? "ASSIGN" : "REASSIGN"
         );
         return AttachmentResponse.from(entity, objectMapper);
+    }
+
+    @Transactional
+    public BatchUpdateAttachmentsResponse batchUpdate(
+            UUID tenantId,
+            BatchUpdateAttachmentsRequest request
+    ) {
+        if (!request.updateContact() && request.category() == null) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "No batch update selected",
+                    "Choose a client assignment, a category, or both."
+            );
+        }
+
+        Set<UUID> uniqueAttachmentIds = new LinkedHashSet<>(request.attachmentIds());
+        if (uniqueAttachmentIds.contains(null)) {
+            throw new ApiException(
+                    HttpStatus.BAD_REQUEST,
+                    "Invalid attachment selection",
+                    "Attachment IDs cannot be null."
+            );
+        }
+
+        if (request.updateContact()) {
+            validateRelatedRecords(tenantId, request.contactId(), null, null, "MANUAL");
+        }
+
+        List<AttachmentResponse> updated = new ArrayList<>(uniqueAttachmentIds.size());
+        for (UUID attachmentId : uniqueAttachmentIds) {
+            AttachmentEntity entity = requireAttachment(tenantId, attachmentId);
+            requireNotDeleted(entity);
+
+            if (request.category() != null) {
+                validateCategory(request.category(), entity.getFileKind());
+                entity.changeCategory(request.category());
+            }
+            if (request.updateContact()) {
+                entity.assignContact(request.contactId());
+            }
+            updated.add(AttachmentResponse.from(entity, objectMapper));
+        }
+
+        log.info(
+                "Batch attachment update completed requestedCount={} updatedCount={} updateContact={} contactId={} category={}",
+                request.attachmentIds().size(),
+                updated.size(),
+                request.updateContact(),
+                request.contactId(),
+                request.category()
+        );
+        return new BatchUpdateAttachmentsResponse(updated.size(), List.copyOf(updated));
     }
 
     private AttachmentEntity requireAttachment(UUID tenantId, UUID attachmentId) {
@@ -356,7 +491,13 @@ public class AttachmentService {
         return (root, query, cb) -> cb.equal(root.get("tenantId"), tenantId);
     }
 
-    private void validateRelatedRecords(UUID tenantId, UUID contactId, UUID estimateId, UUID parentAttachmentId) {
+    private void validateRelatedRecords(
+            UUID tenantId,
+            UUID contactId,
+            UUID estimateId,
+            UUID parentAttachmentId,
+            String sourceSystem
+    ) {
         if (contactId != null
                 && !contactService.belongsToTenant(tenantId, contactId)
                 && !securityProperties.isAllowUnverifiedContactIds()) {
@@ -366,11 +507,13 @@ public class AttachmentService {
                     "The selected contact does not exist for this tenant."
             );
         }
-        if (estimateId != null && !securityProperties.isAllowUnverifiedEstimateIds()) {
+        if (estimateId != null
+                && !"ESTIMATOR".equals(sourceSystem)
+                && !securityProperties.isAllowUnverifiedEstimateIds()) {
             throw new ApiException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "Estimate verification is not configured",
-                    "Estimate-linked uploads are disabled until estimate ownership can be verified against the CRM database."
+                    "Only authenticated Estimator uploads may supply an estimate ID until shared estimate verification is available."
             );
         }
         if (parentAttachmentId != null) {
@@ -401,6 +544,48 @@ public class AttachmentService {
                     "The content type is not allowed: " + contentType
             );
         }
+    }
+
+    private void validateTextFileSize(String contentType, long sizeBytes) {
+        if (isPlainText(contentType) && sizeBytes > storageService.maxTextFileSizeBytes()) {
+            throw new ApiException(
+                    HttpStatus.PAYLOAD_TOO_LARGE,
+                    "Text file is too large",
+                    "Plain-text files are limited to " + storageService.maxTextFileSizeBytes()
+                            + " bytes so they can be validated and displayed safely."
+            );
+        }
+    }
+
+    private boolean isPlainText(String contentType) {
+        return "text/plain".equals(storageService.normalizeContentType(contentType));
+    }
+
+    private void validateUtf8(byte[] bytes) {
+        try {
+            StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes));
+        } catch (CharacterCodingException exception) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Text file is not valid UTF-8",
+                    "Save the file as UTF-8 plain text before uploading it. This prevents bullets, em dashes, tildes, and other characters from displaying incorrectly."
+            );
+        }
+    }
+
+    private byte[] stripUtf8Bom(byte[] bytes) {
+        if (bytes.length >= 3
+                && (bytes[0] & 0xFF) == 0xEF
+                && (bytes[1] & 0xFF) == 0xBB
+                && (bytes[2] & 0xFF) == 0xBF) {
+            byte[] withoutBom = new byte[bytes.length - 3];
+            System.arraycopy(bytes, 3, withoutBom, 0, withoutBom.length);
+            return withoutBom;
+        }
+        return bytes;
     }
 
     private void validateFileSize(long sizeBytes) {
@@ -491,11 +676,11 @@ public class AttachmentService {
         }
 
         return switch (normalized) {
-            case "QUO", "FACEBOOK", "JOBBER", "WEBSITE", "GMAIL", "MANUAL" -> normalized;
+            case "QUO", "FACEBOOK", "JOBBER", "WEBSITE", "GMAIL", "MANUAL", "ESTIMATOR" -> normalized;
             default -> throw new ApiException(
                     HttpStatus.BAD_REQUEST,
                     "Unsupported source system",
-                    "Use one of QUO, FACEBOOK, JOBBER, WEBSITE, GMAIL, or MANUAL."
+                    "Use one of QUO, FACEBOOK, JOBBER, WEBSITE, GMAIL, MANUAL, or ESTIMATOR."
             );
         };
     }
